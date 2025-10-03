@@ -1,0 +1,23 @@
+[package]
+name = "exum"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum = "0.8.6"
+inventory = "0.3.21"
+exum_macros = { path = "exum_macros" }
+tokio = "1.47.1"
+
+[workspace]
+members = ["exum_macros", "."]
+
+[dev-dependencies]
+tokio = { version = "1.47.1", features = ["full"] }
+exum = {path = ".", features = ["full"]}
+serde = {version = "1.0.228", features = ["derive"]}
+
+[features]
+default = []
+deref-app = []
+full = ["deref-app"]
