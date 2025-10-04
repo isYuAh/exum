@@ -10,6 +10,9 @@
 - 🎯 路径参数自动解析
 - 📝 查询参数和请求体处理
 - ⚡ 省略返回值时默认返回 `impl IntoResponse`
+- 🌍 环境自动检测和配置覆盖
+- 🔧 环境变量注入支持
+- 📁 多环境配置文件管理
 
 ## 安装
 
@@ -139,6 +142,8 @@ async fn create_user_optional(#[b] user: Option<User>) -> String {
 
 ## 配置
 
+### 手动配置
+
 ```rust
 use exum::config::ApplicationConfig;
 
@@ -149,6 +154,101 @@ let config = ApplicationConfig {
 
 let app = Application::build(config);
 ```
+
+### 从配置文件加载
+
+创建 `config.toml` 文件：
+
+```toml
+addr = [127, 0, 0, 1]
+port = 3000
+```
+
+然后在代码中使用：
+
+```rust
+use exum::config::ApplicationConfig;
+
+let config = ApplicationConfig::from_file("config.toml");
+let app = Application::build(config);
+```
+
+### 环境特定配置
+
+Exum 支持环境特定的配置文件覆盖。系统会自动检测当前环境并加载对应的配置文件：
+
+1. **环境检测规则**：
+   - 如果设置了 `EXUM_ENV` 环境变量，则使用该值
+   - 否则，在调试模式下使用 `dev`，生产模式下使用 `prod`
+
+2. **配置文件加载顺序**：
+   - 首先加载 `config.toml` 作为基础配置
+   - 然后加载 `config.{env}.toml` 并覆盖基础配置
+
+示例：
+```toml
+# config.toml (基础配置)
+addr = [127, 0, 0, 1]
+port = 8080
+database_url = "postgres://localhost:5432/mydb"
+```
+
+```toml
+# config.dev.toml (开发环境配置)
+port = 3000
+database_url = "postgres://localhost:5432/mydb_dev"
+```
+
+```toml
+# config.prod.toml (生产环境配置)
+addr = [0, 0, 0, 0]
+database_url = "${DATABASE_URL}"
+```
+
+### 环境变量注入
+
+配置文件支持环境变量注入，使用 `${VARIABLE_NAME}` 语法：
+
+```toml
+# config.toml
+database_url = "${DATABASE_URL}"
+api_key = "${API_KEY}"
+port = "${PORT:-8080}"  # 支持默认值
+```
+
+在代码中自动加载配置：
+```rust
+use exum::config::ApplicationConfig;
+
+// 自动加载配置，包含环境变量注入和环境特定配置
+let config = ApplicationConfig::load();
+let app = Application::build(config);
+```
+
+### #[main] 宏
+
+Exum 提供了 `#[main]` 宏来自动注入 Application 的构建和运行代码：
+
+```rust
+#[main]
+async fn main() {
+    // 这里可以添加自定义逻辑
+    println!("服务器启动中...");
+}
+
+// 或者从配置文件加载配置
+#[main(config = "config.toml")]
+async fn main() {
+    // 这里可以添加自定义逻辑
+    println!("使用配置文件启动服务器...");
+}
+```
+
+`#[main]` 宏会自动注入以下代码：
+- `#[tokio::main]` 属性
+- `Application::build()` 调用
+- `app.run().await` 调用
+
 
 ## 完整示例
 

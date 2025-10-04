@@ -2,7 +2,7 @@ use proc_macro::{TokenStream};
 use proc_macro2::Span;
 use quote::quote;
 use convert_case::{Case, Casing};
-use syn::{parse::Parser, parse_macro_input, parse_quote, punctuated::Punctuated, Block, Expr, ExprLit, FnArg, Ident, ItemFn, ItemStruct, Lit, LitStr, Meta, MetaNameValue, Pat, Signature, Token};
+use syn::{parse::{Parse, ParseStream, Parser}, parse_macro_input, parse_quote, punctuated::Punctuated, Block, Expr, ExprLit, FnArg, Ident, ItemFn, ItemStruct, Lit, LitStr, Meta, MetaNameValue, Pat, Signature, Token};
 
 
 fn method_to_ident(method: &str) -> syn::Ident {
@@ -276,4 +276,51 @@ pub fn head(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn trace(attr: TokenStream, item: TokenStream) -> TokenStream {
     make_wrapper(attr, item, "TRACE")
+}
+
+#[proc_macro_attribute]
+pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(attr as MainArgs);
+    let input_fn = parse_macro_input!(item as ItemFn);
+
+    let config_expr = if let Some(path) = args.config {
+        quote! { ApplicationConfig::from_file(#path) }
+    } else {
+        quote! { ApplicationConfig::default() }
+    };
+
+    let vis = &input_fn.vis;
+    let block = &input_fn.block;
+
+    quote! {
+        #[tokio::main]
+        #vis async fn main() {
+            let mut app = Application::build(#config_expr);
+            {
+                #block
+            }
+            app.run().await;
+        }
+    }
+    .into()
+}
+
+struct MainArgs {
+    config: Option<LitStr>,
+}
+
+impl Parse for MainArgs {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        if input.is_empty() {
+            return Ok(Self { config: None });
+        }
+
+        let ident: syn::Ident = input.parse()?;
+        if ident != "config" {
+            return Err(input.error("expected `config = \"...\"`"));
+        }
+        let _: Token![=] = input.parse()?;
+        let value: LitStr = input.parse()?;
+        Ok(Self { config: Some(value) })
+    }
 }
