@@ -1,6 +1,6 @@
 use std::{net::SocketAddr};
 #[cfg(feature = "deref-app")]
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
 
 
@@ -30,6 +30,12 @@ impl Deref for Application {
     type Target = Router;
     fn deref(&self) -> &Self::Target {
         &self.app
+    }
+}
+#[cfg(feature = "deref-app")]
+impl DerefMut for Application {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.app
     }
 }
 

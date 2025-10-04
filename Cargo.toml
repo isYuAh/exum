@@ -1,6 +1,6 @@
 [package]
 name = "exum"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 description = "A lightweight Axum syntax sugar library"
 license = "MIT"
@@ -13,6 +13,10 @@ exum_macros = "0.1.3"
 tokio = "1.47.1"
 toml = "0.9.7"
 serde = {version = "1.0.228", features = ["derive"]}
+tower = "0.5.2"
+tower-http = { version = "0.5.2", features = ["fs"], optional = true}
+
+
 
 [workspace]
 members = ["exum_macros", "."]
@@ -23,5 +27,7 @@ exum = {path = ".", features = ["full"]}
 
 [features]
 default = []
-deref-app = []
-full = ["deref-app"]
+deref_app = []
+app_chain_ext = []
+app_chain_ext_full = ["app_chain_ext", "tower-http"]
+full = ["deref_app", "app_chain_ext_full"]

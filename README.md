@@ -13,6 +13,7 @@
 - 🌍 环境自动检测和配置覆盖
 - 🔧 环境变量注入支持
 - 📁 多环境配置文件管理
+- 🔗 链式调用支持（AppChainExt）
 
 ## 安装
 
@@ -297,7 +298,53 @@ async fn main() {
 ## Features
 
 - `deref-app`: 为 `Application` 实现 `Deref` trait，可以直接访问底层的 `Router`
+- `app_chain_ext`: 为 `Application` 提供链式调用方法，支持更灵活的路由配置
+- `app_chain_ext_full`: 包含 `app_chain_ext` 和静态文件服务功能
 - `full`: 包含所有特性
+
+### AppChainExt 特性
+
+`app_chain_ext` 特性为 `Application` 提供了链式调用方法，支持更灵活的路由配置：
+
+```rust
+use exum::*;
+
+#[get("/hello")]
+async fn hello() -> &'static str {
+    "Hello, World!"
+}
+
+#[tokio::main]
+async fn main() {
+    let app = Application::build(ApplicationConfig::default())
+        .route("/custom", axum::routing::get(|| async { "Custom route" }))
+        .nest("/api", axum::Router::new().route("/users", axum::routing::get(|| async { "Users API" })))
+        .merge(axum::Router::new().route("/extra", axum::routing::get(|| async { "Extra route" })));
+    
+    app.run().await;
+}
+```
+
+#### 可用方法
+
+- `.route(path, method)`: 添加单个路由
+- `.nest(path, router)`: 嵌套子路由
+- `.nest_service(path, service)`: 嵌套服务
+- `.merge(router)`: 合并其他路由器
+
+#### 静态文件服务（需要 `app_chain_ext_full` 特性）
+
+```rust
+use exum::*;
+
+#[tokio::main]
+async fn main() {
+    let app = Application::build(ApplicationConfig::default())
+        .serve_dir("/static", "./public");
+    
+    app.run().await;
+}
+```
 
 ## 许可证
 
