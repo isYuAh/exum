@@ -1,4 +1,8 @@
-use std::{net::SocketAddr, ops::Deref};
+use std::{net::SocketAddr};
+#[cfg(feature = "deref-app")]
+use std::ops::Deref;
+
+
 
 use axum::{Router};
 

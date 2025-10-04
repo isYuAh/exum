@@ -284,9 +284,9 @@ pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
     let input_fn = parse_macro_input!(item as ItemFn);
 
     let config_expr = if let Some(path) = args.config {
-        quote! { ApplicationConfig::from_file(#path) }
+        quote! { ::exum::config::ApplicationConfig::from_file(#path) }
     } else {
-        quote! { ApplicationConfig::load() }
+        quote! { ::exum::config::ApplicationConfig::load() }
     };
 
     let vis = &input_fn.vis;
@@ -296,7 +296,7 @@ pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
         #[tokio::main]
         #vis async fn main() {
             let _CONFIG = #config_expr;
-            let mut app = Application::build(_CONFIG);
+            let mut app = ::exum::Application::build(_CONFIG);
             {
                 #block
             }
