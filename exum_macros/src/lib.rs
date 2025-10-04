@@ -1,7 +1,8 @@
 use proc_macro::{TokenStream};
 use proc_macro2::Span;
 use quote::quote;
-use syn::{parse::Parser, parse_macro_input, parse_quote, punctuated::Punctuated, Block, Expr, ExprLit, FnArg, Ident, ItemFn, Lit, LitStr, Meta, MetaNameValue, Pat, Signature, Token};
+use convert_case::{Case, Casing};
+use syn::{parse::Parser, parse_macro_input, parse_quote, punctuated::Punctuated, Block, Expr, ExprLit, FnArg, Ident, ItemFn, ItemStruct, Lit, LitStr, Meta, MetaNameValue, Pat, PatType, Signature, Token};
 
 fn method_to_ident(method: &str) -> syn::Ident {
     syn::Ident::new(&method.to_uppercase(), Span::call_site())
@@ -108,36 +109,79 @@ fn parse_args(args: TokenStream) -> Punctuated<Meta, Token![,]> {
     let parser = Punctuated::<Meta, Token![,]>::parse_terminated;
     parser.parse2(attr_ts2).unwrap()
 }
-fn process_inputs(inputs: &Punctuated<FnArg, Token![,]>, path: &str) 
-    -> (Option<FnArg>, Vec<FnArg>)
+fn handle_q_attr(pat_type: &PatType, q_fields: &mut Vec<syn::Field>) {
+    match &*pat_type.pat {
+        Pat::Ident(pat_ident) => {
+            let name = pat_ident.ident.clone();
+            let ty = *pat_type.ty.clone();
+            q_fields.push(parse_quote! { pub #name: #ty });
+        }
+        Pat::Tuple(tuple) => {
+            for (_i, elem) in tuple.elems.iter().enumerate() {
+                match elem {
+                    Pat::Type(pat_ty) => {
+                        if let Pat::Ident(pat_ident) = &*pat_ty.pat {
+                            let name = pat_ident.ident.clone();
+                            let ty = *pat_ty.ty.clone();
+                            q_fields.push(parse_quote! { pub #name: #ty });
+                        } else {
+                            panic!("#[q] tuple element must be an identifier, e.g. (a: String)");
+                        }
+                    }
+                    Pat::Ident(pat_ident) => {
+                        panic!(
+                            "#[q] tuple element `{}` is missing a type, must be written as `{}: Ty`",
+                            pat_ident.ident,
+                            pat_ident.ident
+                        );
+                    }
+                    _ => {
+                        panic!("#[q] tuple element not supported, must be like (a: String, b: i32)");
+                    }
+                }
+            }
+        }
+        _ => panic!("#[q] only supports simple ident or tuple patterns"),
+    }
+}
+fn handle_b_attr(pat_type: &PatType, other_inputs: &mut Vec<FnArg>) {
+    if let Pat::Ident(pat_ident) = &*pat_type.pat {
+        let name = pat_ident.ident.clone();
+        let ty = pat_type.ty.clone();
+        other_inputs.push(parse_quote! { axum::extract::Json(#name): axum::extract::Json<#ty> });
+    } else {
+        panic!("#[b] only supports simple identifier pattern, e.g. `data: MyType`");
+    }
+}
+fn process_inputs(inputs: &Punctuated<FnArg, Token![,]>, path: &str, fn_name: &Ident) 
+    -> (Option<FnArg>, Vec<FnArg>, Option<ItemStruct>)
 {
     let params = extract_params(path);
     let mut path_idents = Vec::new();
     let mut path_types = Vec::new();
     let mut other_inputs = Vec::new();
+    let mut q_fields: Vec<syn::Field> = Vec::new();
 
     for input in inputs {
         if let FnArg::Typed(pat_type) = input {
             let has_q_attr = pat_type.attrs.iter().any(|a| a.path().is_ident("q"));
+            let has_b_attr = pat_type.attrs.iter().any(|a| a.path().is_ident("b"));
             if has_q_attr {
-                if let Pat::Ident(pat_ident) = *pat_type.pat.clone() {
-                    let var_ident = pat_ident.ident.clone();
-                    let ty = *pat_type.ty.clone();
-                    let new_input: FnArg =
-                        syn::parse_quote! { axum::extract::Query(#var_ident): axum::extract::Query<#ty> };
-                    other_inputs.push(new_input);
-                    continue;
-                }
-            }
-            if let Pat::Ident(ident) = &*pat_type.pat {
+                handle_q_attr(pat_type, &mut q_fields);
+            } else if has_b_attr {
+                handle_b_attr(pat_type, &mut other_inputs);
+            } else if let Pat::Ident(ident) = &*pat_type.pat {
                 let name = ident.ident.to_string();
                 if params.contains(&name) {
                     path_idents.push(ident.ident.clone());
                     path_types.push(&pat_type.ty);
                     continue;
+                } else {
+                    other_inputs.push(input.clone());
                 }
+            } else {
+                other_inputs.push(input.clone());
             }
-            other_inputs.push(input.clone());
         }
     }
 
@@ -149,7 +193,26 @@ fn process_inputs(inputs: &Punctuated<FnArg, Token![,]>, path: &str)
         None
     };
 
-    (path_arg, other_inputs)
+    let q_struct = if !q_fields.is_empty() {
+        let struct_ident = Ident::new(&format!("{}Query", fn_name.to_string().to_case(Case::Pascal)), Span::call_site());
+        let q_struct: ItemStruct = parse_quote! {
+            #[derive(serde::Deserialize)]
+            struct #struct_ident {
+                #(#q_fields),*
+            }
+        };
+        let fields: Vec<Ident> = q_fields.iter().map(|f| f.ident.clone().unwrap()).collect();
+
+        let query_arg: FnArg = parse_quote! {
+            axum::extract::Query(#struct_ident { #(#fields),* }): axum::extract::Query<#struct_ident>
+        };
+        other_inputs.push(query_arg);
+        Some(q_struct)
+    } else {
+        None
+    };
+
+    (path_arg, other_inputs, q_struct)
 }
 fn build_signature(
     fn_name: &Ident,
@@ -182,9 +245,11 @@ fn build_router_expr(methods: &[String], path: &str, fn_name: &Ident) -> proc_ma
 fn expand(
     new_sig: Signature,
     block: Box<Block>,
-    router_expr: proc_macro2::TokenStream
+    router_expr: proc_macro2::TokenStream,
+    q_struct: Option<ItemStruct>
 ) -> TokenStream {
     let expanded = quote! {
+        #q_struct
         #new_sig {
             #block
         }
@@ -202,105 +267,17 @@ fn expand(
 
 #[proc_macro_attribute]
 pub fn route(args: TokenStream, item: TokenStream) -> TokenStream {
-    let attr_ts2: proc_macro2::TokenStream = args.clone().into();
-    let parser = Punctuated::<Meta, Token![,]>::parse_terminated;
-    let args = parser.parse2(attr_ts2).unwrap();
+    let args = parse_args(args);
     let input_fn = parse_macro_input!(item as ItemFn);
-    let mut method: Vec<String> = Vec::new();
-    let mut path = String::from("/");
 
-    for meta in args {
-        if let Meta::NameValue(MetaNameValue {path: path_meta, value, ..}) = meta {
-            if path_meta.is_ident("path") {
-                if let Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) = value {
-                    path = s.value();
-                }
-            } else if path_meta.is_ident("method") {
-                method.extend(collect_methods(value));
-            } else {
-                panic!("Unknow attribute in #[route(...)]");
-            }
-        } else {
-            panic!("unexpected attribute format in #[route(...)]");
-        }
-    }
+    let path = extract_path(&args);
+    let methods = extract_methods(&args);
 
-    if method.is_empty() { method.push("POST".to_string()) };
-    path = normalize_path(&path);
-    let path_lit = LitStr::new(&path, Span::call_site());
-    let fn_name = &input_fn.sig.ident;
-    let params = extract_params(&path);
-    let mut path_idents = Vec::new();
-    let mut path_types = Vec::new();
-    let mut other_inputs = Vec::new();
+    let (path_arg, other_inputs, q_struct) = process_inputs(&input_fn.sig.inputs, &path, &input_fn.sig.ident);
+    let new_sig = build_signature(&input_fn.sig.ident, path_arg, other_inputs);
 
-    for input in &input_fn.sig.inputs {
-        if let FnArg::Typed(pat_type) = input {
-            let has_q_attr = pat_type.attrs.iter().any(|a| a.path().is_ident("q"));
-            if has_q_attr {
-                if let Pat::Ident(pat_ident) = *pat_type.pat.clone() {
-                    let var_ident = pat_ident.ident.clone();
-                    let ty = *pat_type.ty.clone();
-                    let new_input: FnArg =
-                        syn::parse_quote! { axum::extract::Query(#var_ident): axum::extract::Query<#ty> };
-                    other_inputs.push(new_input);
-                    continue;
-                } else {
-                    continue;
-                }
-            }
-            if let Pat::Ident(ident) = &*pat_type.pat {
-                let name = ident.ident.to_string();
-                if params.contains(&name) {
-                    path_idents.push(ident.ident.clone());
-                    path_types.push(&pat_type.ty);
-                } else {
-                    other_inputs.push(input.clone());
-                }
-            }else {
-                other_inputs.push(input.clone());
-            }
-        }
-    }
-
-    let path_arg: Option<FnArg> = if !path_idents.is_empty() {
-        Some(parse_quote! {
-            axum::extract::Path((#(#path_idents),*)): axum::extract::Path<(#(#path_types),*)>
-        })
-    } else {
-        None
-    };
-    let mut new_inputs = Vec::new();
-    if let Some(p) = path_arg {
-        new_inputs.push(p);
-    }
-    new_inputs.extend(other_inputs);
-    let mut new_sig: Signature = parse_quote! {
-        async fn #fn_name(#(#new_inputs),*) -> impl axum::response::IntoResponse
-    };
-
-    let mut router_expr = quote! { router };
-    for m in &method {
-        let method_ident = method_to_ident(m);
-        router_expr = quote! {
-            #router_expr.route(#path_lit, axum::routing::on(axum::routing::MethodFilter::#method_ident, #fn_name))
-        };
-    }
-    new_sig.output = parse_quote!(-> impl axum::response::IntoResponse);
-    let block = &input_fn.block;
-
-    let expanded = quote! {
-        #new_sig {
-            #block
-        }
-
-        inventory::submit! {
-            exum::RouteDef {
-                router: |router| #router_expr,
-            }
-        }
-    };
-    TokenStream::from(expanded)
+    let router_expr = build_router_expr(&methods, &path, &input_fn.sig.ident);
+    expand(new_sig, input_fn.block, router_expr, q_struct)
 }
 
 fn make_wrapper(attr: TokenStream, item: TokenStream, method: &str) -> TokenStream {
