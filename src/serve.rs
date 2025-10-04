@@ -1,4 +1,3 @@
-#[cfg(feature = "deref_app")]
 use std::{net::SocketAddr};
 #[cfg(feature = "deref_app")]
 use std::ops::{Deref, DerefMut};
