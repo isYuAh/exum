@@ -5,7 +5,7 @@ use toml::Value;
 
 use crate::env::{detect_env, inject_env_vars};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, Copy)]
 #[serde(default)]
 pub struct ApplicationConfig {
   pub addr: [u8; 4],

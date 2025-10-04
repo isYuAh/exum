@@ -1,21 +1,11 @@
-use exum::{config::ApplicationConfig, *};
+use axum::routing::{on, MethodFilter};
+use exum::{*};
 
-
-#[get("/hello/:id")]
-async fn hello(
-    id: String, 
-    #[q] q: String, 
-    #[q] (a, b): (i32, i32)
-) {
-    format!("id: {}, q: {}, a: {}, b: {}", id, q, a, b)
-}
-#[get("/hover")]
-async fn hello2(id: String) -> String {
-    format!("YOU!, {}", id)
-}
-
-
-#[exum::main]
+#[main]
 async fn main() {
-    
+    app_chain!(app, {
+        route("/", on(MethodFilter::GET, || async { "Hello, World!" })),
+        route("/hello", on(MethodFilter::GET, || async { "Hello, World!" }))
+    });
+
 }

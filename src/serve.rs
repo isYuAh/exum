@@ -5,6 +5,7 @@ use std::ops::{Deref, DerefMut};
 
 use axum::{Router};
 
+#[derive(Debug)]
 pub struct Application {
     pub app: Router,
     pub config: ApplicationConfig,
