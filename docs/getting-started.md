@@ -8,12 +8,6 @@
 cargo add exum
 ```
 
-这会自动获取最新版本。如果需要指定版本，可以：
-
-```bash
-cargo add exum
-```
-
 或者手动在 `Cargo.toml` 中添加
 
 ## 基础示例
