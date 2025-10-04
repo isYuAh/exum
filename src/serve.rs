@@ -7,8 +7,8 @@ use std::ops::Deref;
 use axum::{Router};
 
 pub struct Application {
-    app: Router,
-    config: ApplicationConfig,
+    pub app: Router,
+    pub config: ApplicationConfig,
 }
 impl Application {
     pub fn build(config: ApplicationConfig) -> Self {
