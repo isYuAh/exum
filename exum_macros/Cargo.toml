@@ -2,6 +2,9 @@
 name = "exum_macros"
 version = "0.1.0"
 edition = "2024"
+description = "Macros for Exum (Axum syntax sugar)"
+license = "MIT"
+repository = "https://github.com/isyuah/exum"
 
 [lib]
 proc-macro = true

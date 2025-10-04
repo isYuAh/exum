@@ -2,6 +2,9 @@
 name = "exum"
 version = "0.1.0"
 edition = "2024"
+description = "A lightweight Axum syntax sugar library"
+license = "MIT"
+repository = "https://github.com/isyuah/exum"
 
 [dependencies]
 axum = "0.8.6"
