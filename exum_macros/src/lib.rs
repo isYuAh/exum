@@ -286,7 +286,7 @@ pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
     let config_expr = if let Some(path) = args.config {
         quote! { ApplicationConfig::from_file(#path) }
     } else {
-        quote! { ApplicationConfig::default() }
+        quote! { ApplicationConfig::load() }
     };
 
     let vis = &input_fn.vis;
@@ -295,7 +295,8 @@ pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
     quote! {
         #[tokio::main]
         #vis async fn main() {
-            let mut app = Application::build(#config_expr);
+            let _CONFIG = #config_expr;
+            let mut app = Application::build(_CONFIG);
             {
                 #block
             }

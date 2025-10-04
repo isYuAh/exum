@@ -1,4 +1,4 @@
-use std::{fs, path::Path, sync::OnceLock};
+use std::{fs, sync::OnceLock};
 
 use serde::Deserialize;
 use toml::Value;
@@ -6,6 +6,7 @@ use toml::Value;
 use crate::env::{detect_env, inject_env_vars};
 
 #[derive(Debug, Deserialize)]
+#[serde(default)]
 pub struct ApplicationConfig {
   pub addr: [u8; 4],
   pub port: u16,
