@@ -1,6 +1,6 @@
 [package]
 name = "exum"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2024"
 description = "A lightweight Axum syntax sugar library"
 license = "MIT"
@@ -30,4 +30,4 @@ default = []
 deref_app = []
 app_chain_ext = []
 app_chain_ext_full = ["app_chain_ext", "tower-http"]
-full = ["deref_app", "app_chain_ext_full"]
+full = ["app_chain_ext_full"]

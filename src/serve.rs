@@ -26,6 +26,7 @@ impl Application {
     }
 }
 #[cfg(feature = "deref_app")]
+#[cfg(not(feature = "app_chain_ext"))]
 impl Deref for Application {
     type Target = Router;
     fn deref(&self) -> &Self::Target {
@@ -33,6 +34,7 @@ impl Deref for Application {
     }
 }
 #[cfg(feature = "deref_app")]
+#[cfg(not(feature = "app_chain_ext"))]
 impl DerefMut for Application {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.app
