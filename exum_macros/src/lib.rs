@@ -1,3 +1,4 @@
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use proc_macro::{TokenStream};
 use proc_macro2::Span;
 use quote::quote;
@@ -31,7 +32,9 @@ fn extract_params(path: &str) -> Vec<String> {
     path.split('/')
         .filter_map(|s| {
             if s.starts_with('{') && s.ends_with('}') {
-                Some(s.trim_start_matches('{').trim_end_matches('}').to_string())
+                let inner = &s[1..s.len() - 1];
+                let name = inner.trim_start_matches('*').trim_start_matches('*');
+                Some(name.to_string())
             } else {
                 None
             }
@@ -66,8 +69,19 @@ fn normalize_path(path: &str) -> String {
             }
         } else if seg.starts_with('{') && seg.ends_with('}') {
             out.push_str(seg);
+        } else if seg.starts_with('*') {
+            let name = &seg[1..];
+            if name.starts_with('*') {
+                out.push_str("{**");
+                out.push_str(&name[1..]);
+                out.push('}');
+            } else {
+                out.push_str("{*");
+                out.push_str(name);
+                out.push('}');
+            }
         } else {
-            out.push_str(seg);
+            out.push_str(&utf8_percent_encode(seg, NON_ALPHANUMERIC).to_string());
         }
     }
 
