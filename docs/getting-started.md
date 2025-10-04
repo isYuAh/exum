@@ -39,7 +39,7 @@ async fn main() {
 
 ## #[main] 宏
 
-Exum 提供了 `#[main]` 宏来自动注入 Application 的构建和运行代码：
+Exum 提供了 `#[main]` 宏来自动注入 Application 的构建和运行代码，简化启动流程：
 
 ```rust
 #[main]
@@ -47,16 +47,8 @@ async fn main() {
     // 这里可以添加自定义逻辑
     println!("服务器启动中...");
 }
-
-// 或者从配置文件加载配置
-#[main(config = "config.toml")]
-async fn main() {
-    // 这里可以添加自定义逻辑
-    println!("使用配置文件启动服务器...");
-}
 ```
 
-`#[main]` 宏会自动注入以下代码：
-- `#[tokio::main]` 属性
-- `Application::build()` 调用
-- `app.run().await` 调用
+`#[main]` 宏会自动处理配置加载、应用构建和运行等繁琐步骤。
+
+> 详细用法请参考：[main 宏文档](./main-macro.md)
