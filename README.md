@@ -23,6 +23,7 @@ content: # Exum
 - 🔧 支持多种HTTP方法
 - 🎯 路径参数自动解析
 - 📝 查询参数和请求体处理
+- ⚡ 省略返回值时默认返回 `impl IntoResponse`
 
 ## 安装
 
@@ -46,6 +47,12 @@ async fn hello(id: String, #[q] q: String) -> String {
 #[post("/users")]
 async fn create_user(#[b] user: User) -> String {
     format!("Created user: {:?}", user)
+}
+
+// 省略返回值时，默认返回 impl IntoResponse
+#[get("/simple")]
+async fn simple_handler() {
+    "Hello, World!"
 }
 
 #[tokio::main]
