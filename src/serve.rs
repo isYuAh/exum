@@ -1,7 +1,7 @@
+#[cfg(feature = "deref_app")]
 use std::{net::SocketAddr};
-#[cfg(feature = "deref-app")]
+#[cfg(feature = "deref_app")]
 use std::ops::{Deref, DerefMut};
-
 
 
 use axum::{Router};
@@ -25,14 +25,14 @@ impl Application {
         axum::serve(listener, self.app.clone()).await.unwrap();
     }
 }
-#[cfg(feature = "deref-app")]
+#[cfg(feature = "deref_app")]
 impl Deref for Application {
     type Target = Router;
     fn deref(&self) -> &Self::Target {
         &self.app
     }
 }
-#[cfg(feature = "deref-app")]
+#[cfg(feature = "deref_app")]
 impl DerefMut for Application {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.app
