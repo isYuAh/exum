@@ -2,7 +2,8 @@ use proc_macro::{TokenStream};
 use proc_macro2::Span;
 use quote::quote;
 use convert_case::{Case, Casing};
-use syn::{parse::Parser, parse_macro_input, parse_quote, punctuated::Punctuated, Block, Expr, ExprLit, FnArg, Ident, ItemFn, ItemStruct, Lit, LitStr, Meta, MetaNameValue, Pat, PatType, Signature, Token};
+use syn::{parse::Parser, parse_macro_input, parse_quote, punctuated::Punctuated, Block, Expr, ExprLit, FnArg, Ident, ItemFn, ItemMod, ItemStruct, Lit, LitStr, Meta, MetaNameValue, Pat, Signature, Token};
+
 
 fn method_to_ident(method: &str) -> syn::Ident {
     syn::Ident::new(&method.to_uppercase(), Span::call_site())
@@ -109,50 +110,10 @@ fn parse_args(args: TokenStream) -> Punctuated<Meta, Token![,]> {
     let parser = Punctuated::<Meta, Token![,]>::parse_terminated;
     parser.parse2(attr_ts2).unwrap()
 }
-fn handle_q_attr(pat_type: &PatType, q_fields: &mut Vec<syn::Field>) {
-    match &*pat_type.pat {
-        Pat::Ident(pat_ident) => {
-            let name = pat_ident.ident.clone();
-            let ty = *pat_type.ty.clone();
-            q_fields.push(parse_quote! { pub #name: #ty });
-        }
-        Pat::Tuple(tuple) => {
-            for (_i, elem) in tuple.elems.iter().enumerate() {
-                match elem {
-                    Pat::Type(pat_ty) => {
-                        if let Pat::Ident(pat_ident) = &*pat_ty.pat {
-                            let name = pat_ident.ident.clone();
-                            let ty = *pat_ty.ty.clone();
-                            q_fields.push(parse_quote! { pub #name: #ty });
-                        } else {
-                            panic!("#[q] tuple element must be an identifier, e.g. (a: String)");
-                        }
-                    }
-                    Pat::Ident(pat_ident) => {
-                        panic!(
-                            "#[q] tuple element `{}` is missing a type, must be written as `{}: Ty`",
-                            pat_ident.ident,
-                            pat_ident.ident
-                        );
-                    }
-                    _ => {
-                        panic!("#[q] tuple element not supported, must be like (a: String, b: i32)");
-                    }
-                }
-            }
-        }
-        _ => panic!("#[q] only supports simple ident or tuple patterns"),
-    }
-}
-fn handle_b_attr(pat_type: &PatType, other_inputs: &mut Vec<FnArg>) {
-    if let Pat::Ident(pat_ident) = &*pat_type.pat {
-        let name = pat_ident.ident.clone();
-        let ty = pat_type.ty.clone();
-        other_inputs.push(parse_quote! { axum::extract::Json(#name): axum::extract::Json<#ty> });
-    } else {
-        panic!("#[b] only supports simple identifier pattern, e.g. `data: MyType`");
-    }
-}
+
+mod handle_input;
+use handle_input::{handle_b_attr, handle_q_attr};
+
 fn process_inputs(inputs: &Punctuated<FnArg, Token![,]>, path: &str, fn_name: &Ident) 
     -> (Option<FnArg>, Vec<FnArg>, Option<ItemStruct>)
 {
@@ -215,9 +176,9 @@ fn process_inputs(inputs: &Punctuated<FnArg, Token![,]>, path: &str, fn_name: &I
     (path_arg, other_inputs, q_struct)
 }
 fn build_signature(
-    fn_name: &Ident,
     path_arg: Option<FnArg>,
-    mut other_inputs: Vec<FnArg>
+    mut other_inputs: Vec<FnArg>,
+    original_sig: &Signature,
 ) -> Signature {
     let mut new_inputs = Vec::new();
     if let Some(p) = path_arg {
@@ -225,10 +186,15 @@ fn build_signature(
     }
     new_inputs.append(&mut other_inputs);
 
-    let mut new_sig: Signature = parse_quote! {
-        async fn #fn_name(#(#new_inputs),*) -> impl axum::response::IntoResponse
-    };
-    new_sig.output = parse_quote!(-> impl axum::response::IntoResponse);
+    let mut new_sig = original_sig.clone();
+    new_sig.inputs.clear();
+    for arg in new_inputs {
+        new_sig.inputs.push(arg);
+    }
+    if matches!(new_sig.output, syn::ReturnType::Default) {
+        new_sig.output = parse_quote!(-> impl axum::response::IntoResponse);
+    }
+
     new_sig
 }
 fn build_router_expr(methods: &[String], path: &str, fn_name: &Ident) -> proc_macro2::TokenStream {
@@ -274,20 +240,14 @@ pub fn route(args: TokenStream, item: TokenStream) -> TokenStream {
     let methods = extract_methods(&args);
 
     let (path_arg, other_inputs, q_struct) = process_inputs(&input_fn.sig.inputs, &path, &input_fn.sig.ident);
-    let new_sig = build_signature(&input_fn.sig.ident, path_arg, other_inputs);
+    let new_sig = build_signature(path_arg, other_inputs, &input_fn.sig);
 
     let router_expr = build_router_expr(&methods, &path, &input_fn.sig.ident);
     expand(new_sig, input_fn.block, router_expr, q_struct)
 }
 
-fn make_wrapper(attr: TokenStream, item: TokenStream, method: &str) -> TokenStream {
-    let lit = parse_macro_input!(attr as LitStr);
-
-    let new_attr = format!("path = \"{}\", method = \"{}\"", lit.value(), method);
-    let new_attr_ts: TokenStream = new_attr.parse().unwrap();
-
-    route(new_attr_ts, item)
-}
+mod derive_route_macro;
+use derive_route_macro::make_wrapper;
 
 #[proc_macro_attribute]
 pub fn get(attr: TokenStream, item: TokenStream) -> TokenStream {
