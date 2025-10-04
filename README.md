@@ -39,11 +39,18 @@ async fn create_user(#[b] user: User) -> String {
     format!("Created user: {:?}", user)
 }
 
-#[tokio::main]
+// 使用 #[main] 宏自动处理应用初始化和配置加载
+#[main]
 async fn main() {
-    let app = Application::build(ApplicationConfig::default());
-    app.run().await;
+    
 }
+
+// 或者使用传统方式手动初始化
+// #[tokio::main]
+// async fn main() {
+//     let app = Application::build(ApplicationConfig::default());
+//     app.run().await;
+// }
 ```
 
 ## 文档
@@ -56,6 +63,7 @@ async fn main() {
 - [⚙️ 配置管理](docs/configuration.md) - 环境配置和配置文件
 - [📁 静态文件服务](docs/static-files.md) - 静态文件服务和SPA回退
 - [🚀 高级功能](docs/advanced.md) - 快速响应构建器、CORS支持等
+- [🎯 #[main] 宏](docs/main-macro.md) - 自动应用初始化和配置管理
 
 ## Features
 
