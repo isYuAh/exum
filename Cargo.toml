@@ -9,7 +9,7 @@ repository = "https://github.com/isyuah/exum"
 [dependencies]
 axum = "0.8.6"
 inventory = "0.3.21"
-exum_macros = { path = "exum_macros" }
+exum_macros = "0.1.0"
 tokio = "1.47.1"
 
 [workspace]

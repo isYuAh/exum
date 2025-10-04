@@ -129,7 +129,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "exum",
- "exum_macros",
+ "exum_macros 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "inventory",
  "serde",
  "tokio",
@@ -138,6 +138,20 @@ dependencies = [
 [[package]]
 name = "exum_macros"
 version = "0.1.0"
+dependencies = [
+ "axum",
+ "convert_case",
+ "inventory",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "exum_macros"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91162e27dc6f884fb6b394224bea35e891c8a6e32751312fc4d07a71f8bb1400"
 dependencies = [
  "axum",
  "convert_case",
