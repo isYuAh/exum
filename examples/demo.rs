@@ -15,8 +15,7 @@ async fn hello2(id: String) -> String {
 }
 
 
-#[tokio::main]
+#[exum::main]
 async fn main() {
-    let app = Application::build(ApplicationConfig::default());
-    app.run().await;
+    
 }
