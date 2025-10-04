@@ -2,7 +2,7 @@ use proc_macro::{TokenStream};
 use proc_macro2::Span;
 use quote::quote;
 use convert_case::{Case, Casing};
-use syn::{parse::Parser, parse_macro_input, parse_quote, punctuated::Punctuated, Block, Expr, ExprLit, FnArg, Ident, ItemFn, ItemMod, ItemStruct, Lit, LitStr, Meta, MetaNameValue, Pat, Signature, Token};
+use syn::{parse::Parser, parse_macro_input, parse_quote, punctuated::Punctuated, Block, Expr, ExprLit, FnArg, Ident, ItemFn, ItemStruct, Lit, LitStr, Meta, MetaNameValue, Pat, Signature, Token};
 
 
 fn method_to_ident(method: &str) -> syn::Ident {
