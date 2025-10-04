@@ -1,18 +1,4 @@
-
-
-
-          
-我来为你创建一个README.md文件，介绍这个Exum库的功能和用法。
-        
-            
-toolName: write_to_file
-            
-status: success
-          
-            
-filePath: e:\Proj\Rust\exum\README.md
-          
-content: # Exum
+# Exum
 
 一个轻量级的 Axum 语法糖库，提供更简洁的路由定义语法。
 
