@@ -399,8 +399,14 @@ mod process;
 pub fn controller(attr: TokenStream, item: TokenStream) -> TokenStream {
     let prefix = parse_macro_input!(attr as syn::LitStr).value();
     let mut impl_block = parse_macro_input!(item as ItemImpl);
+    let controller_ident = &impl_block.self_ty;
+    let controller_name = match &**controller_ident {
+        syn::Type::Path(tp) => tp.path.segments.last().unwrap().ident.to_string(),
+        _ => "UnknownController".to_string(),
+    };
     for item in &mut impl_block.items {
         if let syn::ImplItem::Fn(method) = item {
+            let mut is_route_fn = false;
             for attr in &mut method.attrs {
                 if let Some(ident) = attr.path().get_ident() {
                     let name = ident.to_string();
@@ -420,21 +426,37 @@ pub fn controller(attr: TokenStream, item: TokenStream) -> TokenStream {
                                 }
                                 Ok(())
                             });
+                            is_route_fn = true;
                             *attr = syn::parse_quote!(#[#ident(#new_tokens)])
                         }
                         RouteAttrType::Derive => {
                             let lit = attr.parse_args::<syn::LitStr>().unwrap();
                             let joined = process::join_path(&prefix, &lit.value());
+                            is_route_fn = true;
                             *attr = syn::parse_quote! {#[#ident(#joined)]}
                         }
                         RouteAttrType::Not => {}
                     }
                 }
             }
+            if is_route_fn {
+                let orig_ident = &method.sig.ident;
+                let new_name = format!("__exum_flat_{}_{}", controller_name, orig_ident);
+                let new_ident = syn::Ident::new(&new_name, orig_ident.span());
+                method.sig.ident = new_ident;
+            }
         }
     }
+    let mod_name = format!("__exum_generated_{}", controller_name);
+    let mod_ident = syn::Ident::new(&mod_name, Span::call_site());
     let items = impl_block.items;
-    TokenStream::from(quote!{
-        #(#items)*
+    TokenStream::from(quote! {
+        #[doc(hidden)]
+        #[allow(non_snake_case)]
+        #[allow(dead_code)]
+        mod #mod_ident {
+            use super::*;
+            #(#items)*
+        }
     })
 }

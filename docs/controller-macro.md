@@ -9,6 +9,8 @@
 `#[controller]` 宏会：
 - 修改 `impl` 块内的属性宏
 - 最终移除 `impl` 块本身
+- 重命名所有函数以避免命名冲突
+- 将所有函数封装到隐藏模块中
 - 无法使用 `self` 和函数间的相互访问
 - 无法使用任何 impl 块内部的特性
 
@@ -45,21 +47,30 @@ async fn main() {
 
 1. **解析阶段**：宏读取 `impl` 块中的所有函数
 2. **属性修改**：为每个路由宏添加前缀路径
-3. **块消除**：移除 `impl` 块，只保留函数定义
+3. **函数重命名**：为避免命名冲突，为每个函数生成唯一名称
+4. **块消除**：移除 `impl` 块本身，只保留函数定义
+5. **模块封装**：将所有函数封装到一个隐藏模块中
 
 ### 展开后的代码
 
 上面的示例代码实际上会被展开为：
 
 ```rust
-#[route(path="/files/123")]
-async fn list(&self) -> String {
-    format!("file list")
-}
-
-#[get("/files/hello")]
-async fn hello() {
-    "hello"
+#[doc(hidden)]
+#[allow(non_snake_case)]
+#[allow(dead_code)]
+mod __exum_generated_FileController {
+    use super::*;
+    
+    #[route(path="/files/123")]
+    async fn __exum_flat_FileController_list(&self) -> String {
+        format!("file list")
+    }
+    
+    #[get("/files/hello")]
+    async fn __exum_flat_FileController_hello() {
+        "hello"
+    }
 }
 ```
 
@@ -70,13 +81,16 @@ async fn hello() {
 1. **属性宏的限制**：需要读取 `impl` 块内部的项目，`macro_rules!` 无法实现
 2. **代码生成需求**：路由宏需要生成 `const` 和 `inventory` 代码
 3. **路径前缀处理**：需要统一为所有路由方法添加前缀
+4. **命名冲突避免**：需要避免不同控制器中的同名函数冲突
 
 ### 设计权衡
 
-虽然这种设计破坏了正常的 Rust 语法体验，但它是目前唯一可行的方案：
+这种设计通过模块封装和函数重命名解决了命名冲突问题：
 - ✅ 实现了控制器级别的路径前缀
 - ✅ 保持了路由宏的简洁性
+- ✅ 避免了不同控制器间的命名冲突
 - ❌ 牺牲了 `impl` 块的正常功能
+- ⚠️ 函数名称会变为非标准格式（但通过 `#[allow(non_snake_case)]` 抑制警告）
 
 ## 使用限制
 
@@ -85,6 +99,14 @@ async fn hello() {
 - ❌ 不能使用 `self` 访问其他方法
 - ❌ 不能定义关联函数（`fn method() -> Self`）
 - ❌ 不能使用 `impl` 块的其他特性
+
+### 命名处理
+
+为了避免不同控制器间的命名冲突，宏会自动：
+- ✅ 为每个函数生成唯一名称（格式：`__exum_flat_{控制器名}_{函数名}`）
+- ✅ 将所有函数封装到隐藏模块中（格式：`__exum_generated_{控制器名}`）
+- ✅ 添加 `#[allow(non_snake_case)]` 来抑制非标准命名的警告
+- ✅ 添加 `#[allow(dead_code)]` 来抑制未使用代码的警告
 
 ### 替代方案
 
