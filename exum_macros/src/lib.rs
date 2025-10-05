@@ -3,7 +3,7 @@ use proc_macro::{TokenStream};
 use proc_macro2::Span;
 use quote::{format_ident, quote};
 use convert_case::{Case, Casing};
-use syn::{parse::{Parse, ParseStream, Parser}, parse_macro_input, parse_quote, punctuated::Punctuated, Block, Expr, ExprLit, FnArg, Ident, ItemFn, ItemStruct, Lit, LitStr, Meta, MetaNameValue, Pat, Signature, Token};
+use syn::{ parse::Parser, parse_macro_input, parse_quote, punctuated::Punctuated, Block, Expr, ExprLit, FnArg, Ident, ItemFn, ItemImpl, ItemStruct, Lit, LitStr, Meta, MetaNameValue, Pat, Signature, Token};
 
 
 fn method_to_ident(method: &str) -> syn::Ident {
@@ -270,7 +270,7 @@ pub fn route(args: TokenStream, item: TokenStream) -> TokenStream {
 mod derive_route_macro;
 use derive_route_macro::make_wrapper;
 
-use crate::handle_input::handle_dep_attr;
+use crate::{handle_input::handle_dep_attr, process::RouteAttrType};
 
 #[proc_macro_attribute]
 pub fn get(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -301,9 +301,10 @@ pub fn trace(attr: TokenStream, item: TokenStream) -> TokenStream {
     make_wrapper(attr, item, "TRACE")
 }
 
+mod arg_parser;
 #[proc_macro_attribute]
 pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let args = parse_macro_input!(attr as MainArgs);
+    let args = parse_macro_input!(attr as arg_parser::MainArgs);
     let input_fn = parse_macro_input!(item as ItemFn);
 
     let config_expr = if let Some(path) = args.config {
@@ -330,28 +331,6 @@ pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
     .into()
 }
-
-struct MainArgs {
-    config: Option<LitStr>,
-}
-
-impl Parse for MainArgs {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        if input.is_empty() {
-            return Ok(Self { config: None });
-        }
-
-        let ident: syn::Ident = input.parse()?;
-        if ident != "config" {
-            return Err(input.error("expected `config = \"...\"`"));
-        }
-        let _: Token![=] = input.parse()?;
-        let value: LitStr = input.parse()?;
-        Ok(Self { config: Some(value) })
-    }
-}
-
-mod arg_parser;
 
 #[proc_macro_attribute]
 pub fn state(args: TokenStream, input: TokenStream) -> TokenStream {
@@ -412,4 +391,50 @@ pub fn state(args: TokenStream, input: TokenStream) -> TokenStream {
     };
 
     expanded.into()
+}
+
+mod process;
+
+#[proc_macro_attribute]
+pub fn controller(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let prefix = parse_macro_input!(attr as syn::LitStr).value();
+    let mut impl_block = parse_macro_input!(item as ItemImpl);
+    for item in &mut impl_block.items {
+        if let syn::ImplItem::Fn(method) = item {
+            for attr in &mut method.attrs {
+                if let Some(ident) = attr.path().get_ident() {
+                    let name = ident.to_string();
+                    match process::valid_route_macro(&name) {
+                        RouteAttrType::Route => {
+                            let mut new_tokens = proc_macro2::TokenStream::new();
+                            let mut has_path = false;
+                            let _ = attr.parse_nested_meta(|meta| {
+                                if meta.path.is_ident("path") {
+                                    let lit: syn::LitStr = meta.value()?.parse()?;
+                                    let joined = process::join_path(&prefix, &lit.value()); 
+                                    new_tokens.extend(quote!(path = #joined,));
+                                    has_path = true;
+                                } else {
+                                    let method = meta.input.to_string();
+                                    new_tokens.extend(quote! {#method,});
+                                }
+                                Ok(())
+                            });
+                            *attr = syn::parse_quote!(#[#ident(#new_tokens)])
+                        }
+                        RouteAttrType::Derive => {
+                            let lit = attr.parse_args::<syn::LitStr>().unwrap();
+                            let joined = process::join_path(&prefix, &lit.value());
+                            *attr = syn::parse_quote! {#[#ident(#joined)]}
+                        }
+                        RouteAttrType::Not => {}
+                    }
+                }
+            }
+        }
+    }
+    let items = impl_block.items;
+    TokenStream::from(quote!{
+        #(#items)*
+    })
 }

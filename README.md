@@ -15,6 +15,7 @@
 - 📁 多环境配置文件管理
 - 🔗 链式调用支持（AppChainExt）
 - 💉 依赖注入支持（状态管理和自动注入）
+- ⚠️ **高级特性**：Controller 宏（支持分组路径前缀，使用前必须阅读文档！）
 
 ## 安装
 
@@ -66,6 +67,7 @@ async fn main() {
 - [🚀 高级功能](docs/advanced.md) - 快速响应构建器、CORS支持等
 - [🎯 #[main] 宏](docs/main-macro.md) - 自动应用初始化和配置管理
 - [💉 依赖注入](docs/dependency-injection.md) - 状态管理和自动依赖注入
+- [⚠️ Controller 宏](docs/controller-macro.md) - **高级特性，使用前必须阅读文档！**
 
 ## Features
 

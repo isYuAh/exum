@@ -1,4 +1,4 @@
-use syn::{parse::{Parse, ParseStream}, LitBool, Token};
+use syn::{parse::{Parse, ParseStream}, LitBool, LitStr, Token};
 
 pub struct StateArgs {
     pub prewarm: bool,
@@ -22,5 +22,25 @@ impl Parse for StateArgs {
         } else {
             Ok(Self { prewarm: true })
         }
+    }
+}
+
+pub struct MainArgs {
+    pub config: Option<LitStr>,
+}
+
+impl Parse for MainArgs {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        if input.is_empty() {
+            return Ok(Self { config: None });
+        }
+
+        let ident: syn::Ident = input.parse()?;
+        if ident != "config" {
+            return Err(input.error("expected `config = \"...\"`"));
+        }
+        let _: Token![=] = input.parse()?;
+        let value: LitStr = input.parse()?;
+        Ok(Self { config: Some(value) })
     }
 }
