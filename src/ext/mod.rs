@@ -13,7 +13,6 @@ impl ArcAnyExt for dyn Any + Send + Sync {
     {
         if self.is::<T>() {
             let raw = Arc::into_raw(self) as *const T;
-            // SAFETY: 我们已经通过 is::<T>() 确认了类型匹配
             Some(unsafe { Arc::from_raw(raw) })
         } else {
             None

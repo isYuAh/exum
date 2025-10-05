@@ -351,12 +351,13 @@ impl Parse for MainArgs {
     }
 }
 
+mod arg_parser;
 
 #[proc_macro_attribute]
 pub fn state(args: TokenStream, input: TokenStream) -> TokenStream {
     let input_fn = parse_macro_input!(input as ItemFn);
-    let args = args.to_string();
-    let prewarm = args.contains("prewarm");
+    let args = parse_macro_input!(args as arg_parser::StateArgs);
+    let prewarm = args.prewarm;
 
     let fn_name = &input_fn.sig.ident;
     let vis = &input_fn.vis;
@@ -397,8 +398,8 @@ pub fn state(args: TokenStream, input: TokenStream) -> TokenStream {
             })
         }
 
-        fn #def_fn_name() -> crate::StateDef {
-            crate::StateDef {
+        fn #def_fn_name() -> ::exum::StateDef {
+            ::exum::StateDef {
                 type_id: ::std::any::TypeId::of::<#output_ty>(),
                 prewarm: #prewarm,
                 init_fn: #init_fn_name,
@@ -406,7 +407,7 @@ pub fn state(args: TokenStream, input: TokenStream) -> TokenStream {
         }
 
         ::inventory::submit! {
-            crate::StateDefFn(#def_fn_name)
+            ::exum::StateDefFn(#def_fn_name)
         }
     };
 
