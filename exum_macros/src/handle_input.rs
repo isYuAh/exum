@@ -1,4 +1,4 @@
-use syn::{FnArg, Pat, PatType, Type, parse_quote};
+use syn::{parse_quote, FnArg, Pat, PatType, Stmt, Type};
 
 fn extract_inner_option(ty: &Type) -> Option<Type> {
     if let Type::Path(type_path) = ty {
@@ -115,3 +115,14 @@ pub fn handle_b_attr(pat_type: &PatType, other_inputs: &mut Vec<FnArg>) {
     }
 }
 
+pub fn handle_dep_attr(pat_type: &PatType, inject_segs: &mut Vec<Stmt>) {
+    if let Pat::Ident(pat_ident) = &*pat_type.pat {
+        let name = pat_ident.ident.clone();
+        let ty = pat_type.ty.clone();
+        inject_segs.push(parse_quote! { 
+            let #name = ::exum::global_container().get::<#ty>().await;
+         });
+    } else {
+        panic!("#[dep] only supports simple identifier pattern, e.g. `data: MyType`");
+    }
+}

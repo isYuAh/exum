@@ -1,7 +1,7 @@
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use proc_macro::{TokenStream};
 use proc_macro2::Span;
-use quote::quote;
+use quote::{format_ident, quote};
 use convert_case::{Case, Casing};
 use syn::{parse::{Parse, ParseStream, Parser}, parse_macro_input, parse_quote, punctuated::Punctuated, Block, Expr, ExprLit, FnArg, Ident, ItemFn, ItemStruct, Lit, LitStr, Meta, MetaNameValue, Pat, Signature, Token};
 
@@ -129,22 +129,26 @@ mod handle_input;
 use handle_input::{handle_b_attr, handle_q_attr};
 
 fn process_inputs(inputs: &Punctuated<FnArg, Token![,]>, path: &str, fn_name: &Ident) 
-    -> (Option<FnArg>, Vec<FnArg>, Option<ItemStruct>)
+    -> (Option<FnArg>, Vec<FnArg>, Option<ItemStruct>, Vec<syn::Stmt>)
 {
     let params = extract_params(path);
     let mut path_idents = Vec::new();
     let mut path_types = Vec::new();
     let mut other_inputs = Vec::new();
     let mut q_fields: Vec<syn::Field> = Vec::new();
+    let mut inject_segs = Vec::new();
 
     for input in inputs {
         if let FnArg::Typed(pat_type) = input {
             let has_q_attr = pat_type.attrs.iter().any(|a| a.path().is_ident("q"));
             let has_b_attr = pat_type.attrs.iter().any(|a| a.path().is_ident("b"));
+            let has_dep_attr = pat_type.attrs.iter().any(|a| a.path().is_ident("dep"));
             if has_q_attr {
                 handle_q_attr(pat_type, &mut q_fields);
             } else if has_b_attr {
                 handle_b_attr(pat_type, &mut other_inputs);
+            } else if has_dep_attr {
+                handle_dep_attr(pat_type, &mut inject_segs);
             } else if let Pat::Ident(ident) = &*pat_type.pat {
                 let name = ident.ident.to_string();
                 if params.contains(&name) {
@@ -187,7 +191,7 @@ fn process_inputs(inputs: &Punctuated<FnArg, Token![,]>, path: &str, fn_name: &I
         None
     };
 
-    (path_arg, other_inputs, q_struct)
+    (path_arg, other_inputs, q_struct, inject_segs)
 }
 fn build_signature(
     path_arg: Option<FnArg>,
@@ -226,11 +230,14 @@ fn expand(
     new_sig: Signature,
     block: Box<Block>,
     router_expr: proc_macro2::TokenStream,
-    q_struct: Option<ItemStruct>
+    q_struct: Option<ItemStruct>,
+    inject_segs: Vec<syn::Stmt>,
+
 ) -> TokenStream {
     let expanded = quote! {
         #q_struct
         #new_sig {
+            #(#inject_segs),*
             #block
         }
 
@@ -253,15 +260,17 @@ pub fn route(args: TokenStream, item: TokenStream) -> TokenStream {
     let path = extract_path(&args);
     let methods = extract_methods(&args);
 
-    let (path_arg, other_inputs, q_struct) = process_inputs(&input_fn.sig.inputs, &path, &input_fn.sig.ident);
+    let (path_arg, other_inputs, q_struct, inject_segs) = process_inputs(&input_fn.sig.inputs, &path, &input_fn.sig.ident);
     let new_sig = build_signature(path_arg, other_inputs, &input_fn.sig);
 
     let router_expr = build_router_expr(&methods, &path, &input_fn.sig.ident);
-    expand(new_sig, input_fn.block, router_expr, q_struct)
+    expand(new_sig, input_fn.block, router_expr, q_struct, inject_segs)
 }
 
 mod derive_route_macro;
 use derive_route_macro::make_wrapper;
+
+use crate::handle_input::handle_dep_attr;
 
 #[proc_macro_attribute]
 pub fn get(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -310,10 +319,12 @@ pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
         #[tokio::main]
         #vis async fn main() {
             let _CONFIG = #config_expr;
+            init_global_state().await;
             let mut app = ::exum::Application::build(_CONFIG);
             {
                 #block
             }
+            global_container().prewarm_all().await;
             app.run().await;
         }
     }
@@ -338,4 +349,66 @@ impl Parse for MainArgs {
         let value: LitStr = input.parse()?;
         Ok(Self { config: Some(value) })
     }
+}
+
+
+#[proc_macro_attribute]
+pub fn state(args: TokenStream, input: TokenStream) -> TokenStream {
+    let input_fn = parse_macro_input!(input as ItemFn);
+    let args = args.to_string();
+    let prewarm = args.contains("prewarm");
+
+    let fn_name = &input_fn.sig.ident;
+    let vis = &input_fn.vis;
+    let sig = &input_fn.sig;
+    let block = &input_fn.block;
+
+    let output_ty = match &input_fn.sig.output {
+        syn::ReturnType::Type(_, ty) => ty.clone(),
+        syn::ReturnType::Default => {
+            return syn::Error::new_spanned(
+                &input_fn.sig.ident,
+                "state function must return a type",
+            )
+            .to_compile_error()
+            .into();
+        }
+    };
+
+    let init_fn_name = format_ident!("__init_{}", fn_name);
+    let def_fn_name = format_ident!("__state_def_{}", fn_name);
+
+    let expanded = quote! {
+        #vis #sig #block
+
+        #[allow(non_upper_case_globals)]
+        fn #init_fn_name() -> ::std::pin::Pin<
+            ::std::boxed::Box<
+                dyn ::std::future::Future<
+                    Output = ::std::sync::Arc<
+                        dyn ::std::any::Any + Send + Sync
+                    >
+                > + Send
+            >
+        > {
+            Box::pin(async {
+                let val: #output_ty = #fn_name().await;
+                ::std::sync::Arc::new(val) as ::std::sync::Arc<dyn ::std::any::Any + Send + Sync>
+            })
+        }
+
+        fn #def_fn_name() -> crate::StateDef {
+            crate::StateDef {
+                type_id: ::std::any::TypeId::of::<#output_ty>(),
+                prewarm: #prewarm,
+                init_fn: #init_fn_name,
+            }
+        }
+
+        ::inventory::submit! {
+            crate::StateDefFn(#def_fn_name)
+        }
+    };
+
+    expanded.into()
 }
