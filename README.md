@@ -14,6 +14,7 @@
 - 🔧 环境变量注入支持
 - 📁 多环境配置文件管理
 - 🔗 链式调用支持（AppChainExt）
+- 💉 依赖注入支持（状态管理和自动注入）
 
 ## 安装
 
@@ -64,6 +65,7 @@ async fn main() {
 - [📁 静态文件服务](docs/static-files.md) - 静态文件服务和SPA回退
 - [🚀 高级功能](docs/advanced.md) - 快速响应构建器、CORS支持等
 - [🎯 #[main] 宏](docs/main-macro.md) - 自动应用初始化和配置管理
+- [💉 依赖注入](docs/dependency-injection.md) - 状态管理和自动依赖注入
 
 ## Features
 
