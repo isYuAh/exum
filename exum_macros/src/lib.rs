@@ -26,7 +26,7 @@ pub fn route(args: TokenStream, item: TokenStream) -> TokenStream {
 mod derive_route_macro;
 use derive_route_macro::make_wrapper;
 
-use crate::{handle_input::handle_dep_attr, route_core::{controller_update_attr, make_route, make_route_from_impl_fn, parse_args}, utils::{is_arc_type, RouteAttrType}};
+use crate::{handle_input::handle_dep_attr, route_core::{controller_update_attr, make_route, make_route_from_impl_fn, parse_args}, utils::{RouteAttrType}};
 
 #[proc_macro_attribute]
 pub fn get(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -169,16 +169,20 @@ pub fn service(args: TokenStream, input: TokenStream) -> TokenStream {
                                 panic!("service method new argument must be Typed")
                             }
                         };
-                        if let Some(inner_ty) = is_arc_type(&pat.ty) {
-                            depend_get_stmts.push(quote! {
-                                let #arg_ident = ::exum::global_container().get::<#inner_ty>().await;
-                            })
-                        }else {
-                            let ty = pat.ty.clone();
-                            depend_get_stmts.push(quote! {
-                                let #arg_ident = ::exum::global_container().get::<#ty>().await.as_ref().clone();
-                            })
-                        }
+                        depend_get_stmts.push(quote! {
+                            let #arg_ident = ::exum::global_container().get::<#pat.ty>().await.lock().await;
+                        });
+                        // if let Some(inner_ty) = is_arc_type(&pat.ty) {
+                        //     depend_get_stmts.push(quote! {
+                        //         let #arg_ident = ::exum::global_container().get::<#inner_ty>().await.locl().await;
+                        //     })
+                        // }else {
+                        //     panic!("service method new argument must be Arc<T> type");
+                            // let ty = pat.ty.clone();
+                            // depend_get_stmts.push(quote! {
+                            //     let #arg_ident = ::exum::global_container().get::<#ty>().await.as_ref().clone();
+                            // })
+                        // }
                         arg_idents.push(arg_ident);
                     }
                 }
@@ -210,7 +214,7 @@ pub fn service(args: TokenStream, input: TokenStream) -> TokenStream {
             Box::pin(async {
                 #(#depend_get_stmts)*
                 let val: #type_ident = #type_ident::new(#(#arg_idents),*).await;
-                ::std::sync::Arc::new(val)
+                ::std::sync::Arc::new(::tokio::sync::Mutex::new(val))
                     as ::std::sync::Arc<dyn ::std::any::Any + Send + Sync>
             })
         }

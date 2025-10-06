@@ -1,11 +1,20 @@
 use convert_case::{Case, Casing};
-use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
+use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::{quote};
 use syn::{
-    parse::Parser, parse_quote, punctuated::Punctuated, token::Comma, Attribute, Block, Expr, ExprLit, FnArg, Ident, ImplItemFn, ItemFn, ItemStruct, Lit, LitStr, Meta, MetaNameValue, Pat, Signature, Token
+    parse::Parser, parse_quote, punctuated::Punctuated, token::Comma, Attribute, Block, Expr, ExprLit, FnArg, Ident, ImplItemFn, ItemFn, ItemStruct, Lit, LitStr, Meta, MetaNameValue, Pat, Signature, Token, Type
 };
+
+static NOT_DEPENCENCY_TYPE: &[&str] = &[
+    // HTTP 核心类型
+    "Method", "Uri", "Version", "HeaderMap",
+    // 请求体类型
+    "String", "Bytes", "Body",
+    // axum 特定类型
+    "OriginalUri", "MatchedPath", "RawQuery",
+];
 
 pub fn method_to_ident(method: &str) -> syn::Ident {
     syn::Ident::new(&method.to_uppercase(), Span::call_site())
@@ -87,7 +96,9 @@ pub fn normalize_path(path: &str) -> String {
                 out.push('}');
             }
         } else {
-            out.push_str(&utf8_percent_encode(seg, NON_ALPHANUMERIC).to_string());
+            // out.push_str(seg);
+            const PATH_SEGMENT_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'/').remove(b'_').remove(b'-');
+            out.push_str(&utf8_percent_encode(seg, PATH_SEGMENT_ENCODE_SET).to_string());
         }
     }
 
@@ -170,21 +181,24 @@ pub fn process_inputs(
         if let FnArg::Typed(pat_type) = input {
             let has_q_attr = pat_type.attrs.iter().any(|a| a.path().is_ident("q"));
             let has_b_attr = pat_type.attrs.iter().any(|a| a.path().is_ident("b"));
-            let has_dep_attr = pat_type.attrs.iter().any(|a| a.path().is_ident("dep"));
+            // let has_dep_attr = pat_type.attrs.iter().any(|a| a.path().is_ident("dep"));
             if has_q_attr {
                 handle_q_attr(pat_type, &mut q_fields);
             } else if has_b_attr {
                 handle_b_attr(pat_type, &mut other_inputs);
-            } else if has_dep_attr {
-                handle_dep_attr(pat_type, &mut inject_segs);
             } else if let Pat::Ident(ident) = &*pat_type.pat {
                 let name = ident.ident.to_string();
                 if params.contains(&name) {
                     path_idents.push(ident.ident.clone());
                     path_types.push(&pat_type.ty);
                     continue;
-                } else {
-                    other_inputs.push(input.clone());
+                } else if let Type::Path(ty) = &*pat_type.ty {
+                    let type_ident = &ty.path.segments.last().unwrap().ident;
+                    if NOT_DEPENCENCY_TYPE.contains(&type_ident.to_string().as_str()) {
+                        other_inputs.push(input.clone());
+                    } else {
+                        handle_dep_attr(pat_type, &mut inject_segs);
+                    }
                 }
             } else {
                 other_inputs.push(input.clone());
@@ -331,7 +345,7 @@ pub fn make_route_from_impl_fn(
     
     let sig_token = quote! {
         #new_sig {
-            #(#inject_segs),*
+            #(#inject_segs)*
             #block
         }
     };

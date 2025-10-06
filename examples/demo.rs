@@ -1,52 +1,57 @@
-use exum::{*};
+use exum::*;
 
-// #[state]
-// async fn str_dep() -> String {
-//     "hello".to_string()
-// }
+#[get("/")]
+async fn index() {
+    "快速开始".to_string()
+}
+#[get("/开始")]
+async fn start() {
+    "自动urlencode".to_string()
+}
 
-// #[get("/hello")]
-// async fn hello() -> String {
-//     format!("hello")
-// }
-
-#[controller("/prefix")]
-impl HelloController {
-    #[get("/hello")]
-    async fn hello(#[q] q: String) -> String {
-        format!("hello: {}", q)
+struct DemoService {
+    name: String,
+    data: Vec<String>,
+}
+#[service]
+impl DemoService {
+    async fn new() -> Self {
+        Self {
+            name: "DemoService 服务".to_string(),
+            data: vec![],
+        }
     }
-
-    #[route(path = "/docs", method = "GET")]
-    async fn docs() {
-        format!("docs")
+    pub fn insert(&mut self, source: String, data: String) {
+        self.data.push(format!("{} 来源于 {}", data, source));
+    }
+    pub fn list(&self) -> &Vec<String> {
+        &self.data
     }
 }
 
-// #[derive(Debug)]
-// struct MyService {
-//     str_dep: Arc<String>,
-// }
-// #[service]
-// impl MyService {
-//     async fn new(depend: Arc<Dependency>) -> Self {
-//         Self {
-//             str_dep: Arc::new(format!("CONCAT: {:?}", depend.depend)),
-//         }
-//     }
-// }
+#[controller("/controller")]
+impl DemoController {
 
-// struct Dependency {
-//     depend: String
-// }
-// #[service]
-// impl Dependency {
-//     async fn new() -> Self {
-//         Self {
-//             depend: "This is Depend".to_string(),
-//         }
-//     }
-// }
+    #[get("/list")]
+    async fn list(service: DemoService) {
+        format!("{} 列表: {:?}", service.name, &service.list())
+    }
+
+    #[get("/insert")]
+    async fn insert(service: DemoService) {
+        service.insert("None".to_string(), "数据".to_string());
+    }
+
+    #[get("/insert_q")]
+    async fn insert_q(#[q] q: String, service: DemoService) {
+        service.insert("Query Source".to_string(), q);
+    }
+
+    #[get("/insert/:data")]
+    async fn insert_p(data: String, service: DemoService) {
+        service.insert("Path Source".to_string(), data);
+    }
+}
 
 #[main]
 async fn main() {

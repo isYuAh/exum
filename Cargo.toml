@@ -1,6 +1,6 @@
 [package]
 name = "exum"
-version = "0.1.14"
+version = "0.1.16"
 edition = "2024"
 description = "A lightweight Axum syntax sugar library"
 license = "MIT"
@@ -9,7 +9,7 @@ repository = "https://github.com/isyuah/exum"
 [dependencies]
 axum = "0.8.6"
 inventory = "0.3.21"
-exum_macros = {path = "exum_macros"}
+exum_macros = "0.1.11"
 tokio = "1.47.1"
 toml = "0.9.7"
 serde = {version = "1.0.228", features = ["derive"]}

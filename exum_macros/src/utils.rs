@@ -24,7 +24,7 @@ pub fn valid_route_macro(name: &str) -> RouteAttrType {
   }
 }
 
-pub fn is_arc_type(ty: &Type) -> Option<&Type> {
+pub fn _is_arc_type(ty: &Type) -> Option<&Type> {
     if let Type::Path(tp) = ty {
         if let Some(seg) = tp.path.segments.last() {
             if seg.ident == "Arc" {

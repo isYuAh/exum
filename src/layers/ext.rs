@@ -6,7 +6,7 @@ use tower::Service;
 use percent_encoding::{self, AsciiSet, NON_ALPHANUMERIC};
 
 use crate::fast_builder;
-const PATH_SEGMENT_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'/');
+const PATH_SEGMENT_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'/').remove(b'_').remove(b'-');
 
 pub trait UrlEncodedMethodExt {
   fn nest_service_<T>(self, path: &str, service: T) -> Self

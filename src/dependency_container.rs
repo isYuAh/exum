@@ -1,7 +1,7 @@
 use std::{any::{Any, TypeId}, collections::HashMap, pin::Pin, sync::Arc};
 use inventory;
 
-use tokio::sync::OnceCell;
+use tokio::sync::{Mutex, OnceCell};
 
 use crate::ext::ArcAnyExt;
 
@@ -74,12 +74,12 @@ impl LazyDependencyContainer {
           .insert(type_id, Arc::new(OnceCell::new()));
   }
 
-  pub async fn get<T:'static + Send + Sync>(&self) -> Arc<T> {
+  pub async fn get<T:'static + Send + Sync>(&self) -> Arc<Mutex<T>> {
     let type_id = TypeId::of::<T>();
     let init_fn = self.registry.get(&type_id).expect("No init function found for type");
     let cell = self.instances.get(&type_id).expect("No instance cell found for type");
     let instance = cell.get_or_init(|| init_fn()).await.clone();
-    instance.clone().downcast_arc::<T>().unwrap()
+    instance.clone().downcast_arc::<Mutex<T>>().unwrap()
   }
 
   pub async fn prewarm_all(&self) {
