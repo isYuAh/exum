@@ -2,6 +2,7 @@ mod serve;
 pub use serve::*;
 
 mod env;
+pub mod controller;
 
 pub mod config;
 #[cfg(feature = "app_chain_ext")]

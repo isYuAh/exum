@@ -52,9 +52,12 @@ pub fn collect_router() -> Router {
     for route in inventory::iter::<RouteDef> {
         router = (route.router)(router);
     }
+    for controller in inventory::iter::<ControllerDef> {
+        router = router.merge((controller.router)());
+    }
     router
 }
 
 pub use exum_macros::*;
 
-use crate::config::ApplicationConfig;
+use crate::{config::ApplicationConfig, controller::ControllerDef};

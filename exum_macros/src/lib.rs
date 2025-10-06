@@ -1,276 +1,32 @@
-use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use proc_macro::{TokenStream};
 use proc_macro2::Span;
 use quote::{format_ident, quote};
-use convert_case::{Case, Casing};
-use syn::{ parse::Parser, parse_macro_input, parse_quote, punctuated::Punctuated, Block, Expr, ExprLit, FnArg, Ident, ItemFn, ItemImpl, ItemStruct, Lit, LitStr, Meta, MetaNameValue, Pat, PatIdent, Signature, Token, TypePath};
-
-
-fn method_to_ident(method: &str) -> syn::Ident {
-    syn::Ident::new(&method.to_uppercase(), Span::call_site())
-}
-
-fn collect_methods(expr: Expr) -> Vec<String> {
-    match expr {
-        Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) => s.value().split(',').map(|s| s.to_uppercase()).collect(),
-        Expr::Array(arr) => arr
-            .elems
-            .iter()
-            .map(|e| {
-                if let Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) = e {
-                    s.value().to_uppercase()
-                } else {
-                    panic!("Array element must be a string literal")
-                }
-            })
-            .collect(),
-        _ => panic!("Expression must be a string literal or an array of string literals"),
-    }
-}
-
-fn extract_params(path: &str) -> Vec<String> {
-    path.split('/')
-        .filter_map(|s| {
-            if s.starts_with('{') && s.ends_with('}') {
-                let inner = &s[1..s.len() - 1];
-                let name = inner.trim_start_matches('*').trim_start_matches('*');
-                Some(name.to_string())
-            } else {
-                None
-            }
-        })
-        .collect()
-}
-
-fn normalize_path(path: &str) -> String {
-    if path.is_empty() {
-        return "/".to_string();
-    }
-
-    if path == "/" {
-        return "/".to_string();
-    }
-
-    let mut out = String::new();
-    for seg in path.split('/') {
-        if seg.is_empty() {
-            continue;
-        }
-        out.push('/');
-
-        if seg.starts_with(':') {
-            let name = seg[1..].trim();
-            if name.is_empty() {
-                out.push_str(seg);
-            } else {
-                out.push('{');
-                out.push_str(name);
-                out.push('}');
-            }
-        } else if seg.starts_with('{') && seg.ends_with('}') {
-            out.push_str(seg);
-        } else if seg.starts_with('*') {
-            let name = &seg[1..];
-            if name.starts_with('*') {
-                out.push_str("{**");
-                out.push_str(&name[1..]);
-                out.push('}');
-            } else {
-                out.push_str("{*");
-                out.push_str(name);
-                out.push('}');
-            }
-        } else {
-            out.push_str(&utf8_percent_encode(seg, NON_ALPHANUMERIC).to_string());
-        }
-    }
-
-    if out.is_empty() {
-        out.push('/');
-    }
-    out
-}
-
-fn extract_path(args: &Punctuated<Meta, Token![,]>) -> String {
-    let mut path = "/".to_string();
-    for meta in args {
-        if let Meta::NameValue(MetaNameValue {path: path_meta, value, ..}) = meta {
-            if path_meta.is_ident("path") {
-                if let Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) = value {
-                    path = s.value();
-                }
-            }
-        }
-    }
-    normalize_path(&path)
-}
-
-fn extract_methods(args: &Punctuated<Meta, Token![,]>) -> Vec<String> {
-    let mut methods = Vec::new();
-    for meta in args {
-        if let Meta::NameValue(MetaNameValue {path: path_meta, value, ..}) = meta {
-            if path_meta.is_ident("method") {
-                methods.extend(collect_methods(value.clone()));
-            }
-        }
-    }
-    if methods.is_empty() {
-        methods.push("POST".to_string());
-    }
-    methods
-}
-fn parse_args(args: TokenStream) -> Punctuated<Meta, Token![,]> {
-    let attr_ts2: proc_macro2::TokenStream = args.into();
-    let parser = Punctuated::<Meta, Token![,]>::parse_terminated;
-    parser.parse2(attr_ts2).unwrap()
-}
+use syn::{ parse_macro_input, punctuated::Punctuated, ItemFn, ItemImpl, Meta, Pat, PatIdent, Token, TypePath};
 
 mod handle_input;
-use handle_input::{handle_b_attr, handle_q_attr};
 
-fn process_inputs(inputs: &Punctuated<FnArg, Token![,]>, path: &str, fn_name: &Ident) 
-    -> (Option<FnArg>, Vec<FnArg>, Option<ItemStruct>, Vec<syn::Stmt>)
-{
-    let params = extract_params(path);
-    let mut path_idents = Vec::new();
-    let mut path_types = Vec::new();
-    let mut other_inputs = Vec::new();
-    let mut q_fields: Vec<syn::Field> = Vec::new();
-    let mut inject_segs = Vec::new();
+mod route_core;
 
-    for input in inputs {
-        if let FnArg::Typed(pat_type) = input {
-            let has_q_attr = pat_type.attrs.iter().any(|a| a.path().is_ident("q"));
-            let has_b_attr = pat_type.attrs.iter().any(|a| a.path().is_ident("b"));
-            let has_dep_attr = pat_type.attrs.iter().any(|a| a.path().is_ident("dep"));
-            if has_q_attr {
-                handle_q_attr(pat_type, &mut q_fields);
-            } else if has_b_attr {
-                handle_b_attr(pat_type, &mut other_inputs);
-            } else if has_dep_attr {
-                handle_dep_attr(pat_type, &mut inject_segs);
-            } else if let Pat::Ident(ident) = &*pat_type.pat {
-                let name = ident.ident.to_string();
-                if params.contains(&name) {
-                    path_idents.push(ident.ident.clone());
-                    path_types.push(&pat_type.ty);
-                    continue;
-                } else {
-                    other_inputs.push(input.clone());
-                }
-            } else {
-                other_inputs.push(input.clone());
-            }
-        }
-    }
-
-    let path_arg: Option<FnArg> = if !path_idents.is_empty() {
-        Some(parse_quote! {
-            axum::extract::Path((#(#path_idents),*)): axum::extract::Path<(#(#path_types),*)>
-        })
-    } else {
-        None
-    };
-
-    let q_struct = if !q_fields.is_empty() {
-        let struct_ident = Ident::new(&format!("{}Query", fn_name.to_string().to_case(Case::Pascal)), Span::call_site());
-        let q_struct: ItemStruct = parse_quote! {
-            #[derive(serde::Deserialize)]
-            struct #struct_ident {
-                #(#q_fields),*
-            }
-        };
-        let fields: Vec<Ident> = q_fields.iter().map(|f| f.ident.clone().unwrap()).collect();
-
-        let query_arg: FnArg = parse_quote! {
-            axum::extract::Query(#struct_ident { #(#fields),* }): axum::extract::Query<#struct_ident>
-        };
-        other_inputs.push(query_arg);
-        Some(q_struct)
-    } else {
-        None
-    };
-
-    (path_arg, other_inputs, q_struct, inject_segs)
-}
-fn build_signature(
-    path_arg: Option<FnArg>,
-    mut other_inputs: Vec<FnArg>,
-    original_sig: &Signature,
-) -> Signature {
-    let mut new_inputs = Vec::new();
-    if let Some(p) = path_arg {
-        new_inputs.push(p);
-    }
-    new_inputs.append(&mut other_inputs);
-
-    let mut new_sig = original_sig.clone();
-    new_sig.inputs.clear();
-    for arg in new_inputs {
-        new_sig.inputs.push(arg);
-    }
-    if matches!(new_sig.output, syn::ReturnType::Default) {
-        new_sig.output = parse_quote!(-> impl axum::response::IntoResponse);
-    }
-
-    new_sig
-}
-fn build_router_expr(methods: &[String], path: &str, fn_name: &Ident) -> proc_macro2::TokenStream {
-    let path_lit = LitStr::new(path, Span::call_site());
-    let mut router_expr = quote! { router };
-    for m in methods {
-        let method_ident = method_to_ident(m);
-        router_expr = quote! {
-            #router_expr.route(#path_lit, axum::routing::on(axum::routing::MethodFilter::#method_ident, #fn_name))
-        };
-    }
-    router_expr
-}
-fn expand(
-    new_sig: Signature,
-    block: Box<Block>,
-    router_expr: proc_macro2::TokenStream,
-    q_struct: Option<ItemStruct>,
-    inject_segs: Vec<syn::Stmt>,
-
-) -> TokenStream {
-    let expanded = quote! {
-        #q_struct
-        #new_sig {
-            #(#inject_segs),*
-            #block
-        }
-
-        inventory::submit! {
-            exum::RouteDef {
-                router: |router| #router_expr,
-            }
-        }
-    };
-    TokenStream::from(expanded)
-}
 
 
 
 #[proc_macro_attribute]
 pub fn route(args: TokenStream, item: TokenStream) -> TokenStream {
     let args = parse_args(args);
-    let input_fn = parse_macro_input!(item as ItemFn);
-
-    let path = extract_path(&args);
-    let methods = extract_methods(&args);
-
-    let (path_arg, other_inputs, q_struct, inject_segs) = process_inputs(&input_fn.sig.inputs, &path, &input_fn.sig.ident);
-    let new_sig = build_signature(path_arg, other_inputs, &input_fn.sig);
-
-    let router_expr = build_router_expr(&methods, &path, &input_fn.sig.ident);
-    expand(new_sig, input_fn.block, router_expr, q_struct, inject_segs)
+    let mut input_fn = parse_macro_input!(item as ItemFn);
+    let (sig_token, collect_token, q_struct) = make_route(args, &mut input_fn);
+    quote! {
+        #q_struct
+        #sig_token
+        #collect_token
+    }
+    .into()
 }
 
 mod derive_route_macro;
 use derive_route_macro::make_wrapper;
 
-use crate::{handle_input::handle_dep_attr, process::{is_arc_type, RouteAttrType}};
+use crate::{handle_input::handle_dep_attr, route_core::{controller_update_attr, make_route, make_route_from_impl_fn, parse_args}, utils::{is_arc_type, RouteAttrType}};
 
 #[proc_macro_attribute]
 pub fn get(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -474,12 +230,19 @@ pub fn service(args: TokenStream, input: TokenStream) -> TokenStream {
     }.into()
 }
 
-mod process;
+mod utils;
 
 #[proc_macro_attribute]
 pub fn controller(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let prefix = parse_macro_input!(attr as syn::LitStr).value();
+    let prefix = if attr.is_empty() {
+        "".to_string()
+    }else {
+        parse_macro_input!(attr as syn::LitStr).value()
+    };
     let mut impl_block = parse_macro_input!(item as ItemImpl);
+    let mut outside_stmts = proc_macro2::TokenStream::new();
+    let mut route_exprs: Vec<proc_macro2::TokenStream> = Vec::new();
+    let mut fns = Vec::new();
     let controller_ident = &impl_block.self_ty;
     let controller_name = match &**controller_ident {
         syn::Type::Path(tp) => tp.path.segments.last().unwrap().ident.to_string(),
@@ -488,56 +251,69 @@ pub fn controller(attr: TokenStream, item: TokenStream) -> TokenStream {
     for item in &mut impl_block.items {
         if let syn::ImplItem::Fn(method) = item {
             let mut is_route_fn = false;
+            let mut args = None;
             for attr in &mut method.attrs {
                 if let Some(ident) = attr.path().get_ident() {
                     let name = ident.to_string();
-                    match process::valid_route_macro(&name) {
+                    match utils::valid_route_macro(&name) {
                         RouteAttrType::Route => {
-                            let mut new_tokens = proc_macro2::TokenStream::new();
-                            let mut has_path = false;
-                            let _ = attr.parse_nested_meta(|meta| {
-                                if meta.path.is_ident("path") {
-                                    let lit: syn::LitStr = meta.value()?.parse()?;
-                                    let joined = process::join_path(&prefix, &lit.value()); 
-                                    new_tokens.extend(quote!(path = #joined,));
-                                    has_path = true;
-                                } else {
-                                    let method = meta.input.to_string();
-                                    new_tokens.extend(quote! {#method,});
-                                }
-                                Ok(())
-                            });
                             is_route_fn = true;
-                            *attr = syn::parse_quote!(#[#ident(#new_tokens)])
+                            let new_tokens = controller_update_attr(attr, &prefix);
+                            *attr = syn::parse_quote!(#[#ident(#new_tokens)]);
+                            args = Some(attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated).unwrap_or_else(|e| {
+                                panic!("{}", e);
+                            }));
                         }
-                        RouteAttrType::Derive => {
+                        RouteAttrType::Derive(method) => {
                             let lit = attr.parse_args::<syn::LitStr>().unwrap();
-                            let joined = process::join_path(&prefix, &lit.value());
+                            let joined = utils::join_path(&prefix, &lit.value());
                             is_route_fn = true;
-                            *attr = syn::parse_quote! {#[#ident(#joined)]}
+                            *attr = syn::parse_quote! {
+                                #[#ident(path = #joined, method = #method)]
+                            };
+                            args = Some(attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated).unwrap_or_else(|e| {
+                                panic!("{:?}", e);
+                            }));
                         }
                         RouteAttrType::Not => {}
                     }
                 }
             }
             if is_route_fn {
-                let orig_ident = &method.sig.ident;
-                let new_name = format!("__exum_flat_{}_{}", controller_name, orig_ident);
-                let new_ident = syn::Ident::new(&new_name, orig_ident.span());
-                method.sig.ident = new_ident;
+                let args = args.unwrap();
+                let (sig_token, router_expr, q_struct) = make_route_from_impl_fn(args, method);
+                outside_stmts.extend(quote! {
+                    #q_struct
+                });
+                route_exprs.push(router_expr);
+                fns.push(sig_token);
+            } else {
+                fns.push(quote! { #method });
             }
         }
     }
     let mod_name = format!("__exum_generated_{}", controller_name);
     let mod_ident = syn::Ident::new(&mod_name, Span::call_site());
-    let items = impl_block.items;
     TokenStream::from(quote! {
         #[doc(hidden)]
         #[allow(non_snake_case)]
         #[allow(dead_code)]
         mod #mod_ident {
             use super::*;
-            #(#items)*
+            #outside_stmts
+            #(#fns)*
+
+            pub fn __collect_routes() -> axum::Router {
+                let mut router = axum::Router::new();
+                #(#route_exprs;)*
+                router
+            }
+        }
+
+        inventory::submit! {
+            ::exum::controller::ControllerDef {
+                router: #mod_ident::__collect_routes,
+            }
         }
     })
 }

@@ -12,13 +12,13 @@ pub fn join_path(prefix: &str, sub: &str) -> String {
 
 pub enum RouteAttrType {
     Route,
-    Derive,
+    Derive(String),
     Not,
 }
 pub fn valid_route_macro(name: &str) -> RouteAttrType {
   if name == "route" {return RouteAttrType::Route;}
   else if ["get", "post", "put", "delete", "patch", "head", "options", "trace"].contains(&name) {
-    RouteAttrType::Derive
+    RouteAttrType::Derive(name.to_string())
   } else {
     RouteAttrType::Not
   }

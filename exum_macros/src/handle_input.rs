@@ -1,6 +1,6 @@
 use syn::{parse_quote, FnArg, Pat, PatType, Stmt, Type};
 
-use crate::process;
+use crate::utils;
 
 fn extract_inner_option(ty: &Type) -> Option<Type> {
     if let Type::Path(type_path) = ty {
@@ -121,7 +121,7 @@ pub fn handle_dep_attr(pat_type: &PatType, inject_segs: &mut Vec<Stmt>) {
     if let Pat::Ident(pat_ident) = &*pat_type.pat {
         let name = pat_ident.ident.clone();
         let ty = pat_type.ty.clone();
-        if let Some(inner_ty) = process::is_arc_type(&ty) {
+        if let Some(inner_ty) = utils::is_arc_type(&ty) {
             inject_segs.push(parse_quote!{
                 let #name = ::exum::global_container().get::<#inner_ty>().await;
             })
