@@ -3,7 +3,7 @@ use proc_macro::{TokenStream};
 use proc_macro2::Span;
 use quote::{format_ident, quote};
 use convert_case::{Case, Casing};
-use syn::{ parse::Parser, parse_macro_input, parse_quote, punctuated::Punctuated, Block, Expr, ExprLit, FnArg, Ident, ItemFn, ItemImpl, ItemStruct, Lit, LitStr, Meta, MetaNameValue, Pat, Signature, Token};
+use syn::{ parse::Parser, parse_macro_input, parse_quote, punctuated::Punctuated, Block, Expr, ExprLit, FnArg, Ident, ItemFn, ItemImpl, ItemStruct, Lit, LitStr, Meta, MetaNameValue, Pat, PatIdent, Signature, Token, TypePath};
 
 
 fn method_to_ident(method: &str) -> syn::Ident {
@@ -270,7 +270,7 @@ pub fn route(args: TokenStream, item: TokenStream) -> TokenStream {
 mod derive_route_macro;
 use derive_route_macro::make_wrapper;
 
-use crate::{handle_input::handle_dep_attr, process::RouteAttrType};
+use crate::{handle_input::handle_dep_attr, process::{is_arc_type, RouteAttrType}};
 
 #[proc_macro_attribute]
 pub fn get(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -391,6 +391,87 @@ pub fn state(args: TokenStream, input: TokenStream) -> TokenStream {
     };
 
     expanded.into()
+}
+
+#[proc_macro_attribute]
+pub fn service(args: TokenStream, input: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(args as arg_parser::StateArgs);
+    let prewarm = args.prewarm;
+    let input_struct = parse_macro_input!(input as ItemImpl);
+    let mut depend_get_stmts = Vec::new();
+    let mut arg_idents = Vec::new();
+
+    for item in &input_struct.items {
+        if let syn::ImplItem::Fn(method) = item {
+            if method.sig.ident == "new" {
+                let args = &method.sig.inputs;
+                for arg in args {
+                    if let syn::FnArg::Typed(pat) = arg {
+                        let arg_ident = match &*pat.pat {
+                            Pat::Ident(PatIdent { ident, .. }) => ident.clone(),
+                            _ => {
+                                panic!("service method new argument must be Typed")
+                            }
+                        };
+                        if let Some(inner_ty) = is_arc_type(&pat.ty) {
+                            depend_get_stmts.push(quote! {
+                                let #arg_ident = ::exum::global_container().get::<#inner_ty>().await;
+                            })
+                        }else {
+                            let ty = pat.ty.clone();
+                            depend_get_stmts.push(quote! {
+                                let #arg_ident = ::exum::global_container().get::<#ty>().await.as_ref().clone();
+                            })
+                        }
+                        arg_idents.push(arg_ident);
+                    }
+                }
+            }
+        }
+    }
+
+    let type_ident = match *input_struct.self_ty.clone() {
+        syn::Type::Path(TypePath {path, ..}) => {
+            path.segments.last().map(|seg| seg.ident.clone()).unwrap_or_else(|| format_ident!("UnknowType"))
+        }
+        _ => format_ident!("UnknowType")
+    };
+    let init_fn_name = format_ident!("__init_{}", type_ident);
+    let def_fn_name = format_ident!("__state_def_{}", type_ident);
+    quote! {
+        #input_struct
+
+        #[allow(non_snake_case)]
+        fn #init_fn_name() -> ::std::pin::Pin<
+            ::std::boxed::Box<
+                dyn ::std::future::Future<
+                    Output = ::std::sync::Arc<
+                        dyn ::std::any::Any + Send + Sync
+                    >
+                > + Send
+            >
+        > {
+            Box::pin(async {
+                #(#depend_get_stmts)*
+                let val: #type_ident = #type_ident::new(#(#arg_idents),*).await;
+                ::std::sync::Arc::new(val)
+                    as ::std::sync::Arc<dyn ::std::any::Any + Send + Sync>
+            })
+        }
+
+        #[allow(non_snake_case)]
+        fn #def_fn_name() -> ::exum::StateDef {
+            ::exum::StateDef {
+                type_id: ::std::any::TypeId::of::<#type_ident>(),
+                prewarm: #prewarm,
+                init_fn: #init_fn_name,
+            }
+        }
+
+        ::inventory::submit! {
+            ::exum::StateDefFn(#def_fn_name)
+        }
+    }.into()
 }
 
 mod process;

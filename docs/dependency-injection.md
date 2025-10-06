@@ -74,11 +74,92 @@ async fn database() -> Database {
 
 ## 依赖注入
 
+### 自动类型区分
+
+Exum 会自动区分 `Arc<T>` 和 `T` 类型：
+
+- **`Arc<T>` 类型**：直接调用 `get::<T>()` 获取，内部保持为 `Arc<T>`，避免不必要的克隆
+- **`T` 类型**：获取值的克隆，需要注意性能影响
+
 ### 路由宏中的自动注入 (`#[dep]`)
 
 **注意：目前 `#[dep]` 属性只支持在路由宏中使用。**
 
 在路由处理函数中使用 `#[dep]` 属性自动注入已定义的状态。
+
+### Service 宏 (`#[service]`)
+
+使用 `#[service]` 宏修饰 `impl` 块，自动为服务类提供依赖注入功能：
+
+- 必须包含 `new` 函数
+- `new` 函数的参数会被自动依赖注入
+- 参数必须是可以被注入的依赖类型
+
+```rust
+use exum::*;
+use std::sync::Arc;
+
+// 基础依赖服务
+struct DatabaseService {
+    connection_string: String,
+}
+
+#[service]
+impl DatabaseService {
+    async fn new() -> Self {
+        // 模拟数据库连接初始化
+        Self {
+            connection_string: "postgres://localhost:5432/mydb".to_string(),
+        }
+    }
+}
+
+// 业务服务，依赖 DatabaseService
+#[derive(Debug)]
+struct UserService {
+    db_service: Arc<DatabaseService>,
+    user_count: usize,
+}
+
+#[service]
+impl UserService {
+    // new 函数的参数会被自动注入
+    // DatabaseService 会被框架自动提供
+    async fn new(db_service: Arc<DatabaseService>) -> Self {
+        println!("UserService 初始化，使用数据库: {}", db_service.connection_string);
+        
+        Self {
+            db_service,
+            user_count: 0, // 模拟用户计数
+        }
+    }
+    
+    // 可以添加其他业务方法
+    async fn add_user(&mut self) {
+        self.user_count += 1;
+        println!("添加用户，当前用户数: {}", self.user_count);
+    }
+}
+
+// 在路由中使用服务
+#[get("/users")]
+async fn get_users(#[dep] user_service: Arc<UserService>) -> String {
+    format!(
+        "用户服务信息 - 数据库: {}, 当前用户数: {}",
+        user_service.db_service.connection_string, user_service.user_count
+    )
+}
+
+#[post("/users")]
+async fn add_user(#[dep] mut user_service: Arc<UserService>) -> String {
+    // 注意：Arc 需要可变引用才能修改内部数据
+    // 在实际应用中可能需要使用 Mutex 或 RwLock
+    let mut service = Arc::get_mut(&mut user_service).unwrap();
+    service.add_user().await;
+    
+    format!("用户添加成功，当前用户数: {}", service.user_count)
+}
+```
 
 ### 手动获取依赖
 
@@ -146,6 +227,7 @@ async fn get_status(
 ```rust
 use exum::*;
 use std::sync::atomic::AtomicUsize;
+use std::sync::Arc;
 
 // 状态定义
 #[derive(Debug)]
@@ -161,6 +243,21 @@ pub struct Counter {
 #[derive(Debug)]
 pub struct Database {
     pub connection_string: String,
+}
+
+// 服务定义
+#[derive(Debug)]
+pub struct UserService {
+    config: Arc<AppConfig>,
+    db: Arc<Database>,
+}
+
+// 使用 service 宏自动注入依赖
+#[service]
+impl UserService {
+    async fn new(config: Arc<AppConfig>, db: Arc<Database>) -> Self {
+        Self { config, db }
+    }
 }
 
 // 预热数据库连接
@@ -184,6 +281,17 @@ async fn config() -> AppConfig {
 async fn counter() -> Counter {
     println!("[counter] 初始化计数器");
     Counter { value: AtomicUsize::new(0) }
+}
+
+// 用户服务
+#[state]
+async fn user_service() -> UserService {
+    println!("[user_service] 初始化用户服务");
+    // 依赖会自动注入到 UserService::new 中
+    UserService::new(
+        global_container().get::<AppConfig>().await,
+        global_container().get::<Database>().await,
+    ).await
 }
 
 // 路由处理函数
@@ -217,6 +325,15 @@ async fn status(
     )
 }
 
+// 使用服务
+#[get("/users")]
+async fn get_users(#[dep] user_service: Arc<UserService>) -> String {
+    format!(
+        "用户服务 - 版本: {}, 数据库: {}",
+        user_service.config.version, user_service.db.connection_string
+    )
+}
+
 // 使用 #[main] 宏自动处理初始化
 #[main]
 async fn main() {
@@ -245,3 +362,11 @@ async fn main() {
 - 使用 `#[dep]` 注入的状态参数名必须与状态函数名匹配
 - 预热状态会在应用启动时立即初始化，可能影响启动时间
 - **目前 `#[dep]` 属性只支持在路由宏中使用**
+- **类型区分注意事项**：
+  - `Arc<T>` 类型会直接获取，避免不必要的克隆
+  - `T` 类型会调用 `clone()` 获取值的副本，需要注意性能影响
+  - 建议对大型对象使用 `Arc<T>` 以避免克隆开销
+- **Service 宏注意事项**：
+  - 必须包含 `new` 函数
+  - `new` 函数的参数必须是可以被注入的依赖类型
+  - 参数会被自动依赖注入，无需手动调用 `global_container().get()`

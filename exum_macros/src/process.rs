@@ -1,3 +1,5 @@
+use syn::{GenericArgument, PathArguments, Type};
+
 pub fn join_path(prefix: &str, sub: &str) -> String {
     let mut res = String::new();
     res.push_str(prefix);
@@ -20,4 +22,19 @@ pub fn valid_route_macro(name: &str) -> RouteAttrType {
   } else {
     RouteAttrType::Not
   }
+}
+
+pub fn is_arc_type(ty: &Type) -> Option<&Type> {
+    if let Type::Path(tp) = ty {
+        if let Some(seg) = tp.path.segments.last() {
+            if seg.ident == "Arc" {
+                if let PathArguments::AngleBracketed(args) = &seg.arguments {
+                    if let Some(GenericArgument::Type(inner_ty)) = args.args.first() {
+                        return Some(inner_ty);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
