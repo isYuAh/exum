@@ -109,6 +109,207 @@ static NOT_DEPENCENCY_TYPE: &[&str] = &[
 - `new` 函数的参数会被自动依赖注入
 - 参数必须是可以被注入的依赖类型
 
+### Trait 依赖注入
+
+Exum 支持对 trait 的依赖注入功能，用法是直接在参数中声明为 `dyn Trait` 类型。
+
+#### 使用前提
+
+`#[service]` 宏必须作用于 `impl Trait for Struct` 语句才会为 Trait 注册依赖。注意：每个 Trait 只能有一个 service 实现。
+
+#### 基本用法
+
+```rust
+use exum::*;
+
+// 定义 trait
+pub trait UserRepository {
+    async fn get_user(&self, id: u64) -> Option<String>;
+    async fn save_user(&mut self, user: String) -> bool;
+}
+
+// 实现 trait 的具体结构
+pub struct DatabaseUserRepository {
+    connection_string: String,
+}
+
+// 使用 #[service] 作用于 impl Trait for Struct 来注册 trait 依赖
+#[service]
+impl UserRepository for DatabaseUserRepository {
+    async fn new() -> Self {
+        Self {
+            connection_string: "postgres://localhost:5432/users".to_string(),
+        }
+    }
+    
+    async fn get_user(&self, id: u64) -> Option<String> {
+        Some(format!("用户 {} 来自数据库: {}", id, self.connection_string))
+    }
+    
+    async fn save_user(&mut self, user: String) -> bool {
+        println!("保存用户 {} 到数据库: {}", user, self.connection_string);
+        true
+    }
+}
+
+// 在路由中直接使用 dyn Trait 进行依赖注入
+#[get("/users/{id}")]
+async fn get_user(id: u64, repo: dyn UserRepository) -> String {
+    match repo.get_user(id).await {
+        Some(user) => format!("找到用户: {}", user),
+        None => "用户不存在".to_string(),
+    }
+}
+
+#[post("/users")]
+async fn create_user(mut repo: dyn UserRepository) -> String {
+    if repo.save_user("新用户".to_string()).await {
+        "用户创建成功".to_string()
+    } else {
+        "用户创建失败".to_string()
+    }
+}
+```
+
+#### 多个 Service 实现
+
+虽然每个 Trait 只能有一个通过 `#[service] impl Trait for Struct` 注册的依赖注入，但你可以注册多个具体类型的 service，每个都可以通过具体类型进行依赖注入。这种方式既避免了只能注册一个实现的限制，又能方便地切换不同的实现。
+
+```rust
+use exum::*;
+
+// 定义 trait
+pub trait UserRepository {
+    async fn get_user(&self, id: u64) -> Option<String>;
+    async fn save_user(&mut self, user: String) -> bool;
+}
+
+// 数据库实现
+pub struct DatabaseUserRepository {
+    connection_string: String,
+}
+
+// 实现 trait
+impl UserRepository for DatabaseUserRepository {
+    async fn get_user(&self, id: u64) -> Option<String> {
+        Some(format!("用户 {} 来自数据库: {}", id, self.connection_string))
+    }
+    
+    async fn save_user(&mut self, user: String) -> bool {
+        println!("保存用户 {} 到数据库: {}", user, self.connection_string);
+        true
+    }
+}
+
+// 在 impl for 上使用 #[service] 注册为 trait 依赖注入
+#[service]
+impl UserRepository for DatabaseUserRepository {
+    async fn new() -> Self {
+        Self {
+            connection_string: "postgres://localhost:5432/users".to_string(),
+        }
+    }
+}
+
+// 内存实现
+pub struct MemoryUserRepository {
+    users: std::collections::HashMap<u64, String>,
+}
+
+// 实现 trait
+impl UserRepository for MemoryUserRepository {
+    async fn get_user(&self, id: u64) -> Option<String> {
+        self.users.get(&id).cloned()
+    }
+    
+    async fn save_user(&mut self, user: String) -> bool {
+        let id = self.users.len() as u64 + 1;
+        self.users.insert(id, user);
+        true
+    }
+}
+
+// 在空的 impl 上使用 #[service] 注册具体类型依赖注入
+#[service]
+impl MemoryUserRepository {
+    async fn new() -> Self {
+        Self {
+            users: std::collections::HashMap::new(),
+        }
+    }
+}
+
+// 使用 dyn UserRepository 注入（会注入 DatabaseUserRepository）
+#[get("/users/{id}")]
+async fn get_user(id: u64, repo: dyn UserRepository) -> String {
+    match repo.get_user(id).await {
+        Some(user) => format!("找到用户: {}", user),
+        None => "用户不存在".to_string(),
+    }
+}
+
+// 使用具体类型注入 MemoryUserRepository
+#[get("/memory-users/{id}")]
+async fn get_memory_user(id: u64, repo: MemoryUserRepository) -> String {
+    match repo.get_user(id).await {
+        Some(user) => format!("找到内存用户: {}", user),
+        None => "内存用户不存在".to_string(),
+    }
+}
+
+// 使用具体类型注入 DatabaseUserRepository
+#[get("/db-users/{id}")]
+async fn get_db_user(id: u64, repo: DatabaseUserRepository) -> String {
+    match repo.get_user(id).await {
+        Some(user) => format!("找到数据库用户: {}", user),
+        None => "数据库用户不存在".to_string(),
+    }
+}
+```
+
+#### 实现说明
+
+通过这种方式：
+1. **`#[service] impl UserRepository for DatabaseUserRepository`**：注册 DatabaseUserRepository 为 UserRepository 的依赖注入实现
+2. **`#[service] impl MemoryUserRepository`**：注册 MemoryUserRepository 为具体类型的依赖注入
+3. **`dyn UserRepository`**：会注入 DatabaseUserRepository（因为只有它通过 impl for 注册了 trait 依赖）
+4. **`MemoryUserRepository`**：会注入 MemoryUserRepository 的具体实例
+5. **`DatabaseUserRepository`**：会注入 DatabaseUserRepository 的具体实例
+
+这样既实现了多个具体类型的注册，又能通过 trait 依赖注入方便地切换实现。
+
+#### 实现原理说明
+
+Trait 依赖注入的底层原理是为每个注册的 trait 生成一个全局的获取函数：
+
+```rust
+#[allow(non_snake_case)]
+#[doc(hidden)]
+#[macro_export]
+pub async fn #getter_fn_name() -> ::std::sync::Arc<::tokio::sync::Mutex<#type_ident>> {
+    return ::exum::global_container().get::<#type_ident>().await;
+}
+```
+
+这会导致 crate 中出现一些特殊的函数，但这是必要的，因为：
+- Rust 不允许转换 `?Sized` (dyn Trait)
+- 也不允许安全地通过线程传递 trait 对象
+
+#### 实际类型说明
+
+虽然参数声明为 `dyn Trait`，但实际上注入的是 `MutexGuard<'_, Struct>` 类型，其中 `Struct` 是具体的实现类型。这意味着：
+
+1. **类型安全性**：虽然看起来是 `dyn Trait`，但实际类型是具体的实现类型，这确保了类型安全
+2. **避免魔法代码**：用户应该始终当作 `dyn Trait` 来使用，避免依赖具体实现类型的独有特性或函数
+3. **透明性**：这种实现方式对用户是透明的，只要按照 `dyn Trait` 的约定使用即可
+
+**使用建议**：
+- 始终通过 trait 的接口来操作对象
+- 避免在路由处理函数中访问具体实现类型的独有方法
+- 将 trait 设计为完整的抽象接口，不依赖具体实现细节
+
+虽然这种实现方式有些特殊，但提供了方便的 trait 依赖注入功能。使用时请注意这一实现细节。
+
 ```rust
 use exum::*;
 
