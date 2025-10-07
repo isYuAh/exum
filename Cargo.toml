@@ -1,6 +1,6 @@
 [package]
 name = "exum"
-version = "0.1.16"
+version = "0.1.17"
 edition = "2024"
 description = "A lightweight Axum syntax sugar library"
 license = "MIT"
@@ -9,7 +9,7 @@ repository = "https://github.com/isyuah/exum"
 [dependencies]
 axum = "0.8.6"
 inventory = "0.3.21"
-exum_macros = "0.1.11"
+exum_macros = "0.1.12"
 tokio = "1.47.1"
 toml = "0.9.7"
 serde = {version = "1.0.228", features = ["derive"]}
@@ -29,6 +29,7 @@ members = ["exum_macros", "."]
 [dev-dependencies]
 tokio = { version = "1.47.1", features = ["full"] }
 exum = {path = ".", features = ["full"]}
+serde_json = "1.0.145"
 
 [features]
 default = []

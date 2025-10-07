@@ -131,16 +131,17 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
 name = "exum"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "axum",
  "exum",
- "exum_macros 0.1.11 (registry+https://github.com/rust-lang/crates.io-index)",
+ "exum_macros 0.1.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "httpdate",
  "inventory",
  "mime_guess",
  "percent-encoding",
  "serde",
+ "serde_json",
  "tokio",
  "tokio-util",
  "toml",
@@ -151,7 +152,7 @@ dependencies = [
 
 [[package]]
 name = "exum_macros"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "axum",
  "convert_case",
@@ -164,9 +165,9 @@ dependencies = [
 
 [[package]]
 name = "exum_macros"
-version = "0.1.11"
+version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14e67a4eac71c8811f8f2ef104869b2318f07ede6363fa0116194918916949f7"
+checksum = "2bdea73f5431929076c750d891506ce843e5b21fc67c0366b01af61c1fb91b3a"
 dependencies = [
  "axum",
  "convert_case",

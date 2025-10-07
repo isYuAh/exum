@@ -4,7 +4,7 @@ use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::{quote};
 use syn::{
-    parse::Parser, parse_quote, punctuated::Punctuated, token::Comma, Attribute, Block, Expr, ExprLit, FnArg, Ident, ImplItemFn, ItemFn, ItemStruct, Lit, LitStr, Meta, MetaNameValue, Pat, Signature, Token, Type
+    parse::Parser, parse_quote, punctuated::Punctuated, token::Comma, Attribute, Block, Expr, ExprLit, FnArg, Ident, ImplItemFn, ItemFn, ItemStruct, Lit, LitStr, Meta, MetaNameValue, Pat, Signature, Token, Type, TypeParamBound
 };
 
 static NOT_DEPENCENCY_TYPE: &[&str] = &[
@@ -14,6 +14,8 @@ static NOT_DEPENCENCY_TYPE: &[&str] = &[
     "String", "Bytes", "Body",
     // axum 特定类型
     "OriginalUri", "MatchedPath", "RawQuery",
+    // JSON
+    "Value"
 ];
 
 pub fn method_to_ident(method: &str) -> syn::Ident {
@@ -157,7 +159,7 @@ pub fn parse_args(args: TokenStream) -> Punctuated<Meta, Token![,]> {
 
 use crate::{
     handle_dep_attr,
-    handle_input::{handle_b_attr, handle_q_attr}, utils::join_path,
+    handle_input::{handle_b_attr, handle_q_attr, handle_trait_dep_attr}, utils::join_path,
 };
 
 pub fn process_inputs(
@@ -179,6 +181,21 @@ pub fn process_inputs(
 
     for input in inputs {
         if let FnArg::Typed(pat_type) = input {
+
+            if let Type::TraitObject(tt) = &*pat_type.ty {
+                let bound = tt.bounds.last().unwrap();
+                // panic!("{:?}", bound);
+                if let TypeParamBound::Trait(trait_bound) = bound {
+                    let path = &trait_bound.path;
+                    if let Some(seg) = path.segments.last() {
+                        let trait_ident = &seg.ident;
+                        handle_trait_dep_attr(&pat_type, trait_ident, &mut inject_segs);
+                    }
+                }
+                // other_inputs.push(input.clone());
+                continue;
+            }
+
             let has_q_attr = pat_type.attrs.iter().any(|a| a.path().is_ident("q"));
             let has_b_attr = pat_type.attrs.iter().any(|a| a.path().is_ident("b"));
             // let has_dep_attr = pat_type.attrs.iter().any(|a| a.path().is_ident("dep"));
@@ -230,7 +247,7 @@ pub fn process_inputs(
         let query_arg: FnArg = parse_quote! {
             axum::extract::Query(#struct_ident { #(#fields),* }): axum::extract::Query<#struct_ident>
         };
-        other_inputs.push(query_arg);
+        other_inputs.insert(0, query_arg);
         Some(q_struct)
     } else {
         None

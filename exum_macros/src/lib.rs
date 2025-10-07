@@ -156,6 +156,9 @@ pub fn service(args: TokenStream, input: TokenStream) -> TokenStream {
     let input_struct = parse_macro_input!(input as ItemImpl);
     let mut depend_get_stmts = Vec::new();
     let mut arg_idents = Vec::new();
+    let trait_ident = if let Some(i) = &input_struct.trait_ {
+        i.1.segments.last().map(|v| v.ident.clone())
+    } else { None };
 
     for item in &input_struct.items {
         if let syn::ImplItem::Fn(method) = item {
@@ -198,6 +201,20 @@ pub fn service(args: TokenStream, input: TokenStream) -> TokenStream {
     };
     let init_fn_name = format_ident!("__init_{}", type_ident);
     let def_fn_name = format_ident!("__state_def_{}", type_ident);
+    let trait_getter = if let Some(trait_ident) = &trait_ident {
+        let getter_fn_name = format_ident!("__exum_TDI_get_{}", trait_ident);
+        quote! {
+            #[allow(non_snake_case)]
+            #[doc(hidden)]
+            #[macro_export]
+            pub async fn #getter_fn_name() -> ::std::sync::Arc<::tokio::sync::Mutex<#type_ident>> {
+                return ::exum::global_container().get::<#type_ident>().await;
+            }
+        }
+    } else {
+        quote! {}
+    };
+    
     quote! {
         #input_struct
 
@@ -227,6 +244,8 @@ pub fn service(args: TokenStream, input: TokenStream) -> TokenStream {
                 init_fn: #init_fn_name,
             }
         }
+
+        #trait_getter
 
         ::inventory::submit! {
             ::exum::StateDefFn(#def_fn_name)

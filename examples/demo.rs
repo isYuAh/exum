@@ -1,59 +1,260 @@
+use std::collections::{HashMap};
+
+use axum::response::IntoResponse;
+use axum::Json;
+use exum::layers::static_layer::StaticFileServiceBuilder;
 use exum::*;
+use serde::{Deserialize, Serialize};
+use serde_json::from_str;
+use serde_json::Value;
 
-#[get("/")]
-async fn index() {
-    "快速开始".to_string()
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Response<T: Serialize> {
+    code: u16,
+    msg: String,
+    data: Option<T>,
 }
-#[get("/开始")]
-async fn start() {
-    "自动urlencode".to_string()
+impl<T: Serialize> IntoResponse for Response<T> {
+    fn into_response(self) -> axum::response::Response {
+        let body = serde_json::to_string(&self).unwrap();
+        (body).into_response()
+    }
 }
 
-struct DemoService {
-    name: String,
-    data: Vec<String>,
+#[derive(Debug, Clone, Serialize)]
+pub enum RValue {
+    String(String),
+    Number(u64),
+    Boolean(bool),
+    HashMap(HashMap<String, RValue>),
+    Array(Vec<RValue>),
+    Null,
 }
-#[service]
-impl DemoService {
-    async fn new() -> Self {
-        Self {
-            name: "DemoService 服务".to_string(),
-            data: vec![],
+impl RValue {
+    pub fn from_json(json_value: serde_json::Value) -> Self {
+        match json_value {
+            serde_json::Value::String(s) => Self::String(s),
+            serde_json::Value::Number(n) => Self::Number(n.as_u64().unwrap()),
+            serde_json::Value::Bool(b) => Self::Boolean(b),
+            serde_json::Value::Object(map) => Self::HashMap(map.into_iter().map(|(k, v)| (k, Self::from_json(v))).collect()),
+            serde_json::Value::Array(vec) => Self::Array(vec.into_iter().map(|v| Self::from_json(v)).collect()),
+            serde_json::Value::Null => Self::Null,
         }
     }
-    pub fn insert(&mut self, source: String, data: String) {
-        self.data.push(format!("{} 来源于 {}", data, source));
-    }
-    pub fn list(&self) -> &Vec<String> {
-        &self.data
+    pub fn val(&self) -> serde_json::Value {
+        match self {
+            Self::String(s) => serde_json::Value::String(s.clone()),
+            Self::Number(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
+            Self::Boolean(b) => serde_json::Value::Bool(*b),
+            Self::HashMap(map) => serde_json::Value::Object(map.iter().map(|(k, v)| (k.clone(), v.val().clone())).collect()),
+            Self::Array(vec) => serde_json::Value::Array(vec.iter().map(|v| v.val().clone()).collect()),
+            Self::Null => serde_json::Value::Null,
+        }
     }
 }
 
-#[controller("/controller")]
-impl DemoController {
+pub trait RedisService {
+    fn set(&mut self, topic: String, key: String, value: &RValue);
+    fn get(&self, topic: String, key: String) -> Option<&RValue>;
+    fn list_by_topic(&mut self, topic: String) -> &HashMap<String, RValue>;
+    fn del(&mut self, topic: String, key: String);
+    fn clear(&mut self, topic: String);
+    fn destroy(&mut self);
+}
 
+struct SimpleRedisService {
+    data: HashMap<String, HashMap<String, RValue>>,
+}
+impl SimpleRedisService {
+    async fn new() -> Self {
+        Self {
+            data: HashMap::new(),
+        }
+    }
+}
+#[service]
+impl RedisService for SimpleRedisService {
+    fn set(&mut self, topic: String, key: String, value: &RValue) {
+        self.data.entry(topic).or_insert(HashMap::new()).insert(key, value.clone());
+    }
+    fn get(&self, topic: String, key: String) -> Option<&RValue> {
+        self.data.get(&topic)?.get(&key)
+    }
+    fn list_by_topic(&mut self, topic: String) -> &HashMap<String, RValue> {
+        self.data.entry(topic).or_insert(HashMap::new())
+    }
+    fn del(&mut self, topic: String, key: String) {
+        self.data.entry(topic).or_insert(HashMap::new()).remove(&key);
+    }
+    fn clear(&mut self, topic: String) {
+        self.data.entry(topic).or_insert(HashMap::new()).clear();
+    }
+
+    fn destroy(&mut self) {
+        self.data.clear();
+    }
+}
+
+#[controller("/redis")]
+impl SimpleRedisController {
     #[get("/list")]
-    async fn list(service: DemoService) {
-        format!("{} 列表: {:?}", service.name, &service.list())
+    async fn list(
+        service: dyn RedisService,
+        #[q] topic: String) {
+        let list = service.list_by_topic(topic);
+        Json(Response {
+            code: 200,
+            msg: "success".to_string(),
+            data: Some(list.clone().iter()
+                    .map(|v| (v.0.clone(), v.1.val().clone()))
+                    .collect::<HashMap<String, _>>()),
+        })
     }
 
-    #[get("/insert")]
-    async fn insert(service: DemoService) {
-        service.insert("None".to_string(), "数据".to_string());
+    #[get("/get")]
+    async fn get(service: dyn RedisService, #[q] topic: String, #[q] key: String) {
+        let value = service.get(topic, key);
+        Json(match value {
+            Some(v) => Response {
+                code: 200,
+                msg: "success".to_string(),
+                data: Some(v.val().clone()),
+            },
+            None => Response {
+                code: 404,
+                msg: "key not found".to_string(),
+                data: None,
+            }
+        })
     }
 
-    #[get("/insert_q")]
-    async fn insert_q(#[q] q: String, service: DemoService) {
-        service.insert("Query Source".to_string(), q);
+    #[get("/set")]
+    async fn set(service: dyn RedisService, #[q] topic: String, #[q] key: String, #[q] value: String) {
+        service.set(topic, key, &RValue::String(value));
+        Json(Response::<Option<RValue>> {
+            code: 200,
+            msg: "success".to_string(),
+            data: None,
+        })
+    }
+    #[post("/set")]
+    async fn post_set(
+        service: SimpleRedisService,
+        #[q] topic: Option<String>,
+        #[q] key: Option<String>,
+        body: String,
+    ) {
+        let value = from_str::<serde_json::Value>(&body).unwrap();
+        let final_topic = if let Some(t) = value.get("topic").and_then(|v| v.as_str()) {
+            t.to_string()
+        } else if let Some(t) = topic {
+            t
+        } else {
+            return Json(Response {
+                code: 400,
+                msg: "topic is required".to_string(),
+                data: None,
+            });
+        };
+        let final_key = if let Some(k) = value.get("key").and_then(|v| v.as_str()) {
+            k.to_string()
+        } else if let Some(k) = key {
+            k
+        } else {
+            return Json(Response {
+                code: 400,
+                msg: "key is required".to_string(),
+                data: None,
+            });
+        };
+        let final_value = if let Some(v) = value.get("value") {
+            RValue::from_json(v.clone())
+        } else {
+            return Json(Response {
+                code: 400,
+                msg: "value is required".to_string(),
+                data: None,
+            });
+        };
+        service.set(final_topic.to_string(), final_key.to_string(), &final_value);
+        Json(Response::<Value> {
+            code: 200,
+            msg: "success".to_string(),
+            data: Some(final_value.val().clone()),
+        })
     }
 
-    #[get("/insert/:data")]
-    async fn insert_p(data: String, service: DemoService) {
-        service.insert("Path Source".to_string(), data);
+    #[get("/del")]
+    async fn del(service: dyn RedisService, #[q] topic: String, #[q] key: String) {
+        service.del(topic, key);
+        Json(Response::<Option<RValue>> {
+            code: 200,
+            msg: "success".to_string(),
+            data: None,
+        })
+    }
+
+    #[get("/clear")]
+    async fn clear(service: SimpleRedisService, #[q] topic: String) {
+        service.clear(topic);
+        Json(Response::<Option<RValue>> {
+            code: 200,
+            msg: "success".to_string(),
+            data: None,
+        })
+    }
+
+    #[delete("/destroy")]
+    async fn destroy(service: SimpleRedisService) {
+        service.destroy();
+        Json(Response::<Option<RValue>> {
+            code: 200,
+            msg: "success".to_string(),
+            data: None,
+        })
+    }
+
+    #[get("/")]
+    async fn index() {
+        r"REDIS
+        使用：
+        1. /redis/list?topic=topic_name 列出topic下所有key
+        2. /redis/get?topic=topic_name&key=key_name 获取key对应的值
+        3. /redis/set?topic=topic_name&key=key_name&value=value_name 设置key对应的值
+        4. /redis/del?topic=topic_name&key=key_name 删除key
+        5. /redis/clear?topic=topic_name 清空topic下所有key
+        6. /redis/destroy 销毁所有topic
+        ".to_string()
+    }
+
+    #[get("/status")]
+    async fn status(service: SimpleRedisService, #[q] topic: Option<String>) {
+        match topic {
+            Some(topic) => {
+                let list = service.list_by_topic(topic.clone());
+                Response {
+                    code: 200,
+                    msg: format!("Summary for Topic {}", topic),
+                    data: Some(serde_json::json!({
+                        "topic": topic,
+                        "count": list.len(),
+                        "keys": list.keys().cloned().collect::<Vec<_>>(),
+                    })),
+                }
+            },
+            None => Response {
+                code: 200,
+                msg: "Summary For Redis".to_string(),
+                data: Some(serde_json::json!({
+                    "count": service.data.len(),
+                    "keys": service.data.keys().cloned().collect::<Vec<_>>(),
+                })),
+            }
+        }
     }
 }
 
 #[main]
 async fn main() {
-    
+    app.merge(StaticFileServiceBuilder::new("./ig_static").cors_any().build_router("/static"));
 }

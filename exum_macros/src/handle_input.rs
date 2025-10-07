@@ -1,4 +1,5 @@
-use syn::{parse_quote, FnArg, Pat, PatType, Stmt, Type};
+use quote::{format_ident, quote};
+use syn::{parse_quote, FnArg, Ident, Meta, Pat, PatType, Stmt, Type};
 
 fn extract_inner_option(ty: &Type) -> Option<Type> {
     if let Type::Path(type_path) = ty {
@@ -61,19 +62,23 @@ pub fn handle_b_attr(pat_type: &PatType, other_inputs: &mut Vec<FnArg>) {
     let mut mode = BodyType::Json;
     for attr in &pat_type.attrs {
         if attr.path().is_ident("b") {
-            attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("json") {
-                    mode = BodyType::Json;
-                } else if meta.path.is_ident("form") {
-                    mode = BodyType::Form;
-                } else if meta.path.is_ident("multipart") {
-                    mode = BodyType::Multipart;
-                } else {
-                    panic!("#[b] unknown option — supported: json, form, multipart");
-                }
-                Ok(())
-            })
-            .unwrap();
+            if let Meta::Path(_) = &attr.meta {
+                
+            } else {
+                attr.parse_nested_meta(|meta| {
+                    if meta.path.is_ident("json") {
+                        mode = BodyType::Json;
+                    } else if meta.path.is_ident("form") {
+                        mode = BodyType::Form;
+                    } else if meta.path.is_ident("multipart") {
+                        mode = BodyType::Multipart;
+                    } else {
+                        panic!("#[b] unknown option — supported: json, form, multipart");
+                    }
+                    Ok(())
+                })
+                .unwrap();
+            };
         }
     }
 
@@ -127,5 +132,21 @@ pub fn handle_dep_attr(pat_type: &PatType, inject_segs: &mut Vec<Stmt>) {
         });
     } else {
         panic!("#[dep] only supports simple identifier pattern, e.g. `data: MyType`");
+    }
+}
+
+pub fn handle_trait_dep_attr(pat_type: &PatType, trait_ident: &Ident, inject_segs: &mut Vec<Stmt>) {
+    if let Pat::Ident(pat_ident) = &*pat_type.pat {
+        let name = pat_ident.ident.clone();
+        let getter_fn = format_ident!("__exum_TDI_get_{}", trait_ident);
+        let quote = quote! {
+            #getter_fn().await
+        };
+        inject_segs.push(parse_quote!{
+            let mut #name = crate::#quote;
+        });
+        inject_segs.push(parse_quote!{
+            let mut #name = #name.lock().await;
+        });
     }
 }
