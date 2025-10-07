@@ -305,7 +305,7 @@ pub fn expand(
 ) {
     let sig_token = quote! {
         #new_sig {
-            #(#inject_segs),*
+            #(#inject_segs)*
             #block
         }
     };
@@ -359,7 +359,6 @@ pub fn make_route_from_impl_fn(
         process_inputs(&input_fn.sig.inputs, &path, &input_fn.sig.ident);
     let new_sig = build_signature(path_arg, other_inputs, &input_fn.sig);
     let block = input_fn.block.clone();
-    
     let sig_token = quote! {
         #new_sig {
             #(#inject_segs)*

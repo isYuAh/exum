@@ -173,7 +173,7 @@ pub fn service(args: TokenStream, input: TokenStream) -> TokenStream {
                             }
                         };
                         depend_get_stmts.push(quote! {
-                            let #arg_ident = ::exum::global_container().get::<#pat.ty>().await.lock().await;
+                            let #arg_ident = ::exum::global_container().get::<#pat.ty>().await.clone();
                         });
                         // if let Some(inner_ty) = is_arc_type(&pat.ty) {
                         //     depend_get_stmts.push(quote! {
@@ -207,7 +207,7 @@ pub fn service(args: TokenStream, input: TokenStream) -> TokenStream {
             #[allow(non_snake_case)]
             #[doc(hidden)]
             #[macro_export]
-            pub async fn #getter_fn_name() -> ::std::sync::Arc<::tokio::sync::Mutex<#type_ident>> {
+            pub async fn #getter_fn_name() -> ::std::sync::Arc<#type_ident> {
                 return ::exum::global_container().get::<#type_ident>().await;
             }
         }
@@ -231,8 +231,7 @@ pub fn service(args: TokenStream, input: TokenStream) -> TokenStream {
             Box::pin(async {
                 #(#depend_get_stmts)*
                 let val: #type_ident = #type_ident::new(#(#arg_idents),*).await;
-                ::std::sync::Arc::new(::tokio::sync::Mutex::new(val))
-                    as ::std::sync::Arc<dyn ::std::any::Any + Send + Sync>
+                ::std::sync::Arc::new(val) as ::std::sync::Arc<dyn ::std::any::Any + Send + Sync>
             })
         }
 

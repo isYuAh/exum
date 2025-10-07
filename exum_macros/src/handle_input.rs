@@ -128,7 +128,7 @@ pub fn handle_dep_attr(pat_type: &PatType, inject_segs: &mut Vec<Stmt>) {
             let mut #name = ::exum::global_container().get::<#ty>().await;
         });
         inject_segs.push(parse_quote!{
-            let mut #name = #name.lock().await;
+            let mut #name = #name.clone();
         });
     } else {
         panic!("#[dep] only supports simple identifier pattern, e.g. `data: MyType`");
@@ -146,7 +146,7 @@ pub fn handle_trait_dep_attr(pat_type: &PatType, trait_ident: &Ident, inject_seg
             let mut #name = crate::#quote;
         });
         inject_segs.push(parse_quote!{
-            let mut #name = #name.lock().await;
+            let mut #name = #name.clone();
         });
     }
 }

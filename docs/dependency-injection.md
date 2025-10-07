@@ -76,7 +76,7 @@ async fn database() -> Database {
 
 ### 线程安全机制
 
-Exum 使用 `Mutex` 包装依赖项，确保线程安全。依赖注入现在直接定义为原始类型，实际上是 `MutexGuard<'_, T>` 类型。
+Exum 使用 `Arc` 共享不可变引用，确保线程安全。依赖注入直接定义为原始类型，实际上是 `Arc<T>` 类型。
 
 
 ### 自动依赖判断规则
@@ -286,7 +286,7 @@ Trait 依赖注入的底层原理是为每个注册的 trait 生成一个全局�
 #[allow(non_snake_case)]
 #[doc(hidden)]
 #[macro_export]
-pub async fn #getter_fn_name() -> ::std::sync::Arc<::tokio::sync::Mutex<#type_ident>> {
+pub async fn #getter_fn_name() -> ::std::sync::Arc<#type_ident> {
     return ::exum::global_container().get::<#type_ident>().await;
 }
 ```
@@ -297,7 +297,7 @@ pub async fn #getter_fn_name() -> ::std::sync::Arc<::tokio::sync::Mutex<#type_id
 
 #### 实际类型说明
 
-虽然参数声明为 `dyn Trait`，但实际上注入的是 `MutexGuard<'_, Struct>` 类型，其中 `Struct` 是具体的实现类型。这意味着：
+虽然参数声明为 `dyn Trait`，但实际上注入的是 `Arc<Struct>` 类型，其中 `Struct` 是具体的实现类型。这意味着：
 
 1. **类型安全性**：虽然看起来是 `dyn Trait`，但实际类型是具体的实现类型，这确保了类型安全
 2. **避免魔法代码**：用户应该始终当作 `dyn Trait` 来使用，避免依赖具体实现类型的独有特性或函数
@@ -415,7 +415,7 @@ async fn increment_counter(counter: Counter) -> String {
 }
 ```
 
-**注意**：现在依赖注入直接使用原始类型，框架会自动处理 `Mutex` 包装，确保线程安全。参数会自动判断是否需要依赖注入，无需使用 `#[dep]` 属性。
+**注意**：现在依赖注入直接使用原始类型，框架会自动通过 `Arc` 共享不可变引用，确保线程安全。参数会自动判断是否需要依赖注入，无需使用 `#[dep]` 属性。
 
 ### 注入多个依赖
 
@@ -580,9 +580,8 @@ async fn main() {
   - 参数不是提取器模式，如 `Json(data)`
   - 参数类型不在排除列表中（HTTP核心类型、请求体类型、axum特定类型）
 - **依赖注入机制变更**：
-  - 现在使用 `Mutex` 包装依赖项，确保线程安全
-  - 直接使用原始类型，框架会自动处理 `Mutex` 包装
-  - 不再支持之前的 `Arc` 自动解析机制
+  - 现在使用 `Arc` 共享不可变引用，确保线程安全
+  - 直接使用原始类型，框架会自动通过 `Arc` 共享实例
   - 简化了依赖类型判断逻辑
 - **Service 宏注意事项**：
   - 必须包含 `new` 函数

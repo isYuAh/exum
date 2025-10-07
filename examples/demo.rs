@@ -1,13 +1,19 @@
 use std::collections::{HashMap};
+use std::fmt::Debug;
+use std::sync::{Arc};
+use tokio::sync::Mutex;
 
+use axum::extract::State;
 use axum::response::IntoResponse;
 use axum::Json;
+use axum::Router;
 use exum::layers::static_layer::StaticFileServiceBuilder;
 use exum::*;
 use serde::{Deserialize, Serialize};
 use serde_json::from_str;
 use serde_json::Value;
 
+type RedisServiceImpl = SimpleRedisService;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Response<T: Serialize> {
     code: u16,
@@ -53,45 +59,46 @@ impl RValue {
     }
 }
 
-pub trait RedisService {
-    fn set(&mut self, topic: String, key: String, value: &RValue);
-    fn get(&self, topic: String, key: String) -> Option<&RValue>;
-    fn list_by_topic(&mut self, topic: String) -> &HashMap<String, RValue>;
-    fn del(&mut self, topic: String, key: String);
-    fn clear(&mut self, topic: String);
-    fn destroy(&mut self);
+pub trait RedisService: Debug + Send + Sync {
+    async fn set(&self, topic: String, key: String, value: &RValue);
+    async fn get(&self, topic: String, key: String) -> Option<RValue>;
+    async fn list_by_topic(&self, topic: String) -> HashMap<String, RValue>;
+    async fn del(&self, topic: String, key: String);
+    async fn clear(&self, topic: String);
+    async fn destroy(&self);
 }
 
+#[derive(Clone, Debug)]
 struct SimpleRedisService {
-    data: HashMap<String, HashMap<String, RValue>>,
+    data: Arc<Mutex<HashMap<String, HashMap<String, RValue>>>>,
 }
 impl SimpleRedisService {
     async fn new() -> Self {
         Self {
-            data: HashMap::new(),
+            data: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
 #[service]
 impl RedisService for SimpleRedisService {
-    fn set(&mut self, topic: String, key: String, value: &RValue) {
-        self.data.entry(topic).or_insert(HashMap::new()).insert(key, value.clone());
+    async fn set(&self, topic: String, key: String, value: &RValue) {
+        self.data.lock().await.entry(topic).or_insert(HashMap::new()).insert(key, value.clone());
     }
-    fn get(&self, topic: String, key: String) -> Option<&RValue> {
-        self.data.get(&topic)?.get(&key)
+    async fn get(&self, topic: String, key: String) -> Option<RValue> {
+        self.data.lock().await.get(&topic)?.get(&key).cloned()
     }
-    fn list_by_topic(&mut self, topic: String) -> &HashMap<String, RValue> {
-        self.data.entry(topic).or_insert(HashMap::new())
+    async fn list_by_topic(&self, topic: String) -> HashMap<String, RValue> {
+        self.data.lock().await.entry(topic).or_insert(HashMap::new()).clone()
     }
-    fn del(&mut self, topic: String, key: String) {
-        self.data.entry(topic).or_insert(HashMap::new()).remove(&key);
+    async fn del(&self, topic: String, key: String) {
+        self.data.lock().await.entry(topic).or_insert(HashMap::new()).remove(&key);
     }
-    fn clear(&mut self, topic: String) {
-        self.data.entry(topic).or_insert(HashMap::new()).clear();
+    async fn clear(&self, topic: String) {
+        self.data.lock().await.entry(topic).or_insert(HashMap::new()).clear();
     }
 
-    fn destroy(&mut self) {
-        self.data.clear();
+    async fn destroy(&self) {
+        self.data.lock().await.clear();
     }
 }
 
@@ -101,7 +108,7 @@ impl SimpleRedisController {
     async fn list(
         service: dyn RedisService,
         #[q] topic: String) {
-        let list = service.list_by_topic(topic);
+        let list = service.list_by_topic(topic).await;
         Json(Response {
             code: 200,
             msg: "success".to_string(),
@@ -113,12 +120,13 @@ impl SimpleRedisController {
 
     #[get("/get")]
     async fn get(service: dyn RedisService, #[q] topic: String, #[q] key: String) {
-        let value = service.get(topic, key);
+        let value = service.get(topic, key).await;
         Json(match value {
             Some(v) => Response {
                 code: 200,
                 msg: "success".to_string(),
-                data: Some(v.val().clone()),
+                data: Some(v.val()),
+
             },
             None => Response {
                 code: 404,
@@ -231,7 +239,7 @@ impl SimpleRedisController {
     async fn status(service: SimpleRedisService, #[q] topic: Option<String>) {
         match topic {
             Some(topic) => {
-                let list = service.list_by_topic(topic.clone());
+                let list = service.list_by_topic(topic.clone()).await;
                 Response {
                     code: 200,
                     msg: format!("Summary for Topic {}", topic),
@@ -246,15 +254,21 @@ impl SimpleRedisController {
                 code: 200,
                 msg: "Summary For Redis".to_string(),
                 data: Some(serde_json::json!({
-                    "count": service.data.len(),
-                    "keys": service.data.keys().cloned().collect::<Vec<_>>(),
+                    "count": service.data.lock().await.len(),
+                    "keys": service.data.lock().await.keys().cloned().collect::<Vec<_>>(),
                 })),
             }
         }
     }
 }
 
+#[get("/r")]
+async fn test_fn(service: dyn RedisService) -> String {
+    format!(":{service:?}")
+}
+
 #[main]
 async fn main() {
     app.merge(StaticFileServiceBuilder::new("./ig_static").cors_any().build_router("/static"));
+    app.merge(Router::new().route("/r", axum::routing::get(test_fn)).with_state(Arc::new(SimpleRedisService::new().await)));
 }
